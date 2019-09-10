@@ -1576,33 +1576,33 @@ def Main(data,
         y_pred_test = model.predict(x_test_enum_tokens_tointvec)
 
         # compute a mean per set of augmented SMILES
-        y_pred_train_mean, _ = mean_median_result(x_train_enum_card, y_pred_train)
-        y_pred_valid_mean, _ = mean_median_result(x_valid_enum_card, y_pred_valid)
-        y_pred_test_mean, _ = mean_median_result(x_test_enum_card, y_pred_test)
+        y_pred_train_mean, _ = utils.mean_median_result(x_train_enum_card, y_pred_train)
+        y_pred_valid_mean, _ = utils.mean_median_result(x_valid_enum_card, y_pred_valid)
+        y_pred_test_mean, _ = utils.mean_median_result(x_test_enum_card, y_pred_test)
 
         # inverse transform the scaling of the property and plot 'predictions VS observations'
-        y_pred_VS_true = scaler.inverse_transform(y_train) - \
-                         scaler.inverse_transform(y_pred_train_mean.reshape(-1,1))
-        mae_train = np.mean(np.absolute(y_pred_VS_true))
-        mse_train = np.mean(np.square(y_pred_VS_true))
+        y_pred_VS_true_train = scaler.inverse_transform(y_train) - \
+                               scaler.inverse_transform(y_pred_train_mean.reshape(-1,1))
+        mae_train = np.mean(np.absolute(y_pred_VS_true_train))
+        mse_train = np.mean(np.square(y_pred_VS_true_train))
         corrcoef_train = r2_score(scaler.inverse_transform(y_train), \
                                  scaler.inverse_transform(y_pred_train_mean.reshape(-1,1)))
         print("For the training set:\nMAE: {0:0.4f} RMSE: {1:0.4f} R^2: {2:0.4f}\n".\
               format(mae_train, np.sqrt(mse_train), corrcoef_train))
 
-        y_pred_VS_true = scaler.inverse_transform(y_valid) - \
-                         scaler.inverse_transform(y_pred_valid_mean.reshape(-1,1))
-        mae_valid = np.mean(np.absolute(y_pred_VS_true))
-        mse_valid = np.mean(np.square(y_pred_VS_true))
+        y_pred_VS_true_valid = scaler.inverse_transform(y_valid) - \
+                               scaler.inverse_transform(y_pred_valid_mean.reshape(-1,1))
+        mae_valid = np.mean(np.absolute(y_pred_VS_true_valid))
+        mse_valid = np.mean(np.square(y_pred_VS_true_valid))
         corrcoef_valid = r2_score(scaler.inverse_transform(y_valid), \
-                                 scaler.inverse_transform(y_pred_valid_mean.reshape(-1,1)))
+                                  scaler.inverse_transform(y_pred_valid_mean.reshape(-1,1)))
         print("For the validation set:\nMAE: {0:0.4f} RMSE: {1:0.4f} R^2: {2:0.4f}\n".\
               format(mae_valid, np.sqrt(mse_valid), corrcoef_valid))
 
-        y_pred_VS_true = scaler.inverse_transform(y_test) - \
-                         scaler.inverse_transform(y_pred_test_mean.reshape(-1,1))
-        mae_test = np.mean(np.absolute(y_pred_VS_true))
-        mse_test = np.mean(np.square(y_pred_VS_true))
+        y_pred_VS_true_test = scaler.inverse_transform(y_test) - \
+                              scaler.inverse_transform(y_pred_test_mean.reshape(-1,1))
+        mae_test = np.mean(np.absolute(y_pred_VS_true_test))
+        mse_test = np.mean(np.square(y_pred_VS_true_test))
         corrcoef_test = r2_score(scaler.inverse_transform(y_test), \
                                  scaler.inverse_transform(y_pred_test_mean.reshape(-1,1)))
         print("For the test set:\nMAE: {0:0.4f} RMSE: {1:0.4f} R^2: {2:0.4f}\n".\
@@ -1612,7 +1612,7 @@ def Main(data,
         # Unscaling the data
         y_train = scaler.inverse_transform(y_train)
         y_pred_train_mean = scaler.inverse_transform(y_pred_train_mean.reshape(-1,1))
-        y_valid = scaler.inverse_transform(y_train)
+        y_valid = scaler.inverse_transform(y_valid)
         y_pred_valid_mean = scaler.inverse_transform(y_pred_valid_mean.reshape(-1,1))
         y_test = scaler.inverse_transform(y_test)
         y_pred_test_mean = scaler.inverse_transform(y_pred_test_mean.reshape(-1,1))
