@@ -1624,8 +1624,8 @@ def Main(data,
         # Setting plot limits
         y_true_min = min(np.min(y_train), np.min(y_valid), np.min(y_test))
         y_true_max = max(np.max(y_train), np.max(y_valid), np.max(y_test))
-        y_pred_min = min(np.min(y_train_pred_mean), np.min(y_valid_pred_mean), np.min(y_test_pred))
-        y_pred_max = max(np.max(y_train_pred_mean), np.max(y_valid_pred_mean), np.max(y_test_pred))
+        y_pred_min = min(np.min(y_pred_train_mean), np.min(y_pred_valid_mean), np.min(y_pred_test_mean))
+        y_pred_max = max(np.max(y_pred_train_mean), np.max(y_pred_valid_mean), np.max(y_pred_test_mean))
         # Expanding slightly the canvas around the data points (by 10%)
         axmin = y_true_min-0.1*(y_true_max-y_true_min)
         axmax = y_true_max+0.1*(y_true_max-y_true_min)
@@ -1636,7 +1636,7 @@ def Main(data,
         plt.ylim(min(axmin, aymin), max(axmax, aymax))
                         
         plt.errorbar(y_train, 
-                    y_train_pred_mean,
+                    y_pred_train_mean,
                     fmt='o',
                     label="Train",
                     elinewidth = 1, 
@@ -1645,7 +1645,7 @@ def Main(data,
                     markeredgewidth = 0,
                     alpha=0.7)
         plt.errorbar(y_valid,
-                    y_valid_pred_mean,
+                    y_pred_valid_mean,
                     elinewidth = 1,
                     fmt='o',
                     label="Validation", 
@@ -1654,7 +1654,7 @@ def Main(data,
                     markeredgewidth = 0,
                     alpha=0.7)
         plt.errorbar(y_test,
-                    y_test_pred_mean,
+                    y_pred_test_mean,
                     elinewidth = 1,
                     fmt='o',
                     label="Test", 
