@@ -1,4 +1,4 @@
-import os
+       import os
 import math
 import numpy as np
 import pandas as pd
@@ -17,7 +17,7 @@ from keras import metrics
 from keras import backend as K
 import tensorflow as tf
 
-from SMILESX import utils, smimodel, token, augm
+from SMILESX import utils, model, token, augm
 
 ##
 config = tf.ConfigProto()
@@ -77,9 +77,9 @@ def Interpretation(data,
     print("***Sampling and splitting of the dataset.***\n")
     x_train, x_valid, x_test, y_train, y_valid, y_test, scaler = \
     utils.random_split(smiles_input=data.smiles, 
-                 prop_input=np.array(data.iloc[:,1]), 
-                 random_state=selection_seed, 
-                 scaling = True)
+                       prop_input=np.array(data.iloc[:,1]), 
+                       random_state=selection_seed, 
+                       scaling = True)
 
     np.savetxt(save_dir+'smiles_train.txt', np.asarray(x_train), newline="\n", fmt='%s')
     np.savetxt(save_dir+'smiles_valid.txt', np.asarray(x_valid), newline="\n", fmt='%s')
@@ -161,33 +161,33 @@ def Interpretation(data,
 
     # Best architecture to visualize from
     model_topredict = load_model(input_dir+'LSTMAtt_'+data_name+'_model.best_seed_'+str(selection_seed)+'.hdf5', 
-                           custom_objects={'AttentionM': smimodel.AttentionM()})
+                                          custom_objects={'AttentionM': model.AttentionM()})
     best_arch = [model_topredict.layers[2].output_shape[-1]/2, 
                  model_topredict.layers[3].output_shape[-1], 
                  model_topredict.layers[1].output_shape[-1]]
 
     # Architecture to return attention weights
-    model = smimodel.LSTMAttModel.create(inputtokens = max_length+1, 
-                                vocabsize = vocab_size, 
-                                lstmunits= int(best_arch[0]), 
-                                denseunits = int(best_arch[1]), 
-                                embedding = int(best_arch[2]), 
-                                return_proba = True)
+    model_att = model.LSTMAttModel.create(inputtokens = max_length+1, 
+                                          vocabsize = vocab_size, 
+                                          lstmunits= int(best_arch[0]), 
+                                          denseunits = int(best_arch[1]), 
+                                          embedding = int(best_arch[2]), 
+                                          return_proba = True)
 
     print("Best model summary:\n")
-    print(model.summary())
+    print(model_att.summary())
     print("\n")
 
     print("***Interpretation from the best model.***\n")
-    model.load_weights(input_dir+'LSTMAtt_'+data_name+'_model.best_seed_'+str(selection_seed)+'.hdf5')
-    model.compile(loss="mse", optimizer='adam', metrics=[metrics.mae,metrics.mse])
+    model_att.load_weights(input_dir+'LSTMAtt_'+data_name+'_model.best_seed_'+str(selection_seed)+'.hdf5')
+    model_att.compile(loss="mse", optimizer='adam', metrics=[metrics.mae,metrics.mse])
 
     smiles_toviz_x_enum_tokens_tointvec = token.int_vec_encode(tokenized_smiles_list= smiles_toviz_x_enum_tokens, 
-                                                         max_length = max_length+1,
-                                                         vocab = tokens)
+                                                               max_length = max_length+1,
+                                                               vocab = tokens)
     
-    intermediate_layer_model = Model(inputs=model.input,
-                                     outputs=model.layers[-2].output)
+    intermediate_layer_model = Model(inputs=model_att.input,
+                                     outputs=model_att.layers[-2].output)
     intermediate_output = intermediate_layer_model.predict(smiles_toviz_x_enum_tokens_tointvec)
     
     smiles_toviz_x_card_cumsum_viz = np.cumsum(smiles_toviz_x_enum_card)
@@ -252,8 +252,8 @@ def Interpretation(data,
     for csubsmiles in range(1,smiles_len_tmp):
         isubsmiles = smiles_toviz_x_enum_tokens[ienumcard][:csubsmiles]+[' ']
         isubsmiles_tointvec= token.int_vec_encode(tokenized_smiles_list = [isubsmiles], 
-                                            max_length = max_length+1, 
-                                            vocab = tokens)
+                                                  max_length = max_length+1, 
+                                                  vocab = tokens)
         predict_prop_tmp = model_topredict.predict(isubsmiles_tointvec)[0,0]
         diff_topred_tmp = (predict_prop_tmp-y_pred_test_tmp)/np.abs(y_pred_test_tmp)
         diff_topred_list.append(diff_topred_tmp)

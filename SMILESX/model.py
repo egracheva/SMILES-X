@@ -1,6 +1,6 @@
 from keras.models import Model
 
-from keras.layers import Input, Dropout, Dense
+from keras.layers import Input, Dense
 from keras.layers import Embedding
 from keras.layers.wrappers import Bidirectional
 from keras.layers import CuDNNLSTM, TimeDistributed
@@ -113,7 +113,6 @@ class LSTMAttModel():
         model = Model(inputs=input_, outputs=net)
 
         return model
-##
 ##
 class AttentionMNoTrain(Layer):
     """
