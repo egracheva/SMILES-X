@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import os
 import math
 # For fixing the GPU in use
@@ -22,6 +23,7 @@ import tensorflow as tf
 import multiprocessing
 
 from sklearn.metrics import r2_score
+from sklearn.metrics import mean_squared_error
 
 from SMILESX import utils, token, augm, smimodel
 
@@ -114,24 +116,27 @@ class DataSequence(Sequence):
 ##
 def Main(data, 
          data_name, 
-         bayopt_bounds, 
-         data_units = '',
-         k_fold_number = 8, 
-         augmentation = False, 
-         outdir = "../data/", 
-         bayopt_n_epochs = 10,
-         bayopt_n_rounds = 25, 
-         bayopt_it_factor = 1, 
-         bayopt_on = True, 
-         lstmunits_ref = 512, 
-         denseunits_ref = 512, 
-         embedding_ref = 512, 
-         batch_size_ref = 64, 
-         alpha_ref = 3, 
-         n_gpus = 1, 
-         bridge_type = 'None', 
-         patience = 25, 
-         n_epochs = 1000):
+         data_units, 
+         bayopt_bounds,
+         geom_bounds,
+         weight_range,
+         n_opt_runs = 5,
+         k_fold_number = 5, 
+         augmentation = True, 
+         outdir = "./data/", 
+         bayopt_n_epochs = 20,
+         bayopt_n_rounds = 50,
+         bayopt_it_factor = 1,
+         bayopt_on = True,
+         n_gpus = 1,
+         bridge_type = 'NVLink',
+         lstmunits_ref = 2,
+         denseunits_ref = 2,
+         embedding_ref = 2,
+         batch_size_ref = 64,
+         alpha_ref = 2.8,
+         patience = 50,
+         n_epochs = 100):
     
     if augmentation:
         p_dir_temp = 'Augm'
@@ -158,7 +163,7 @@ def Main(data,
                      prop_input=np.array(data.iloc[:,1]), 
                      random_state=selection_seed, 
                      scaling = True)
-              
+        
         # data augmentation or not
         if augmentation == True:
             print("***Data augmentation to {}***\n".format(augmentation))
@@ -227,13 +232,100 @@ def Main(data,
         max_length = np.max([len(ismiles) for ismiles in all_smiles_tokens])
         print("Maximum length of tokenized SMILES: {} tokens (termination spaces included)\n".format(max_length))
         
-        print("***Bayesian Optimization of the SMILESX's architecture.***\n")
+        print("***Optimization of the SMILESX's architecture.***\n")
         # Transformation of tokenized SMILES to vector of intergers and vice-versa
         token_to_int = token.get_tokentoint(tokens)
         int_to_token = token.get_inttotoken(tokens)
         
         if bayopt_on:
-            # Operate the bayesian optimization of the neural architecture
+            # Operate the first step of the optimization:
+            # geometry optimization (number of units in LSTM and Dense layers)
+            def create_mod_geom(params, weight):
+                K.clear_session()
+
+                if n_gpus > 1:
+                    if bridge_type == 'NVLink':
+                        model = smimodel.LSTMAttModelNoTrain.create(inputtokens=max_length+1, 
+                                                    vocabsize=vocab_size,
+                                                    weight=weight,
+                                                    lstmunits=int(params[0]), 
+                                                    denseunits=int(params[1]), 
+                                                    embedding=3
+                                                    )
+                    else:
+                        with tf.device('/cpu'): # necessary to multi-GPU scaling
+                            model = smimodel.LSTMAttModelNoTrain.create(inputtokens = max_length+1, 
+                                                        vocabsize=vocab_size,
+                                                        weight=weight,
+                                                        lstmunits=int(params[0]), 
+                                                        denseunits=int(params[1]), 
+                                                        embedding=3
+                                                        )
+                            
+                    multi_model = smimodel.ModelMGPU(model, gpus=n_gpus, bridge_type=bridge_type)
+                else: # single GPU
+                    model = smimodel.LSTMAttModelNoTrain.create(inputtokens = max_length+1, 
+                                                vocabsize=vocab_size,
+                                                weight=weight, 
+                                                lstmunits=int(params[0]),
+                                                denseunits=int(params[1]), 
+                                                embedding=3
+                                                )
+                    
+                    multi_model = model
+                # Compiling the model
+                multi_model.compile(loss='mse', optimizer='sgd')
+                # Prepare the data for the evaluation
+                x_train_enum_tokens_tointvec = token.int_vec_encode(tokenized_smiles_list = x_train_enum_tokens, 
+                                               max_length = max_length+1, 
+                                               vocab = tokens)
+                x_valid_enum_tokens_tointvec = token.int_vec_encode(tokenized_smiles_list = x_valid_enum_tokens, 
+                                               max_length = max_length+1, 
+                                               vocab = tokens)
+                # Evaluation of the untrained model is performed on both training and validation data merged together
+                x_geom_enum_tokens_tointvec = np.concatenate((x_train_enum_tokens_tointvec, x_valid_enum_tokens_tointvec), axis = 0)
+                y_geom_enum                 = np.concatenate((y_train_enum, y_valid_enum), axis = 0)
+
+                y_geom_pred = model.predict(x_geom_enum_tokens_tointvec, verbose=0)
+
+                score = np.sqrt(mean_squared_error(y_geom_enum, y_geom_pred))
+     
+                return score
+
+            print("***Geometry search.***")
+            # start = time.time()
+            # Prepare the list of all possible geometry combinations in one Pandas DataFrame
+            geoms = []
+            for lstm in geom_bounds[0]:
+                for denseunits in geom_bounds[1]:
+                    geoms.append([lstm, denseunits])
+            geoms = pd.DataFrame(geoms)
+            geoms.columns = ['LSTM', 'Dense']
+
+            # Test each geometry using the single shared weight (all the weights are set to constant)
+            # The score is evaluated over the mean of the sulting predictions
+            # This is the way to test each geometry for "compatibility" with the data -- without training the model
+            # Read more in David Ha's article
+            scores_geom = []
+            for _, geom in geoms.iterrows():
+                cum_score = 0
+                for i, weight in enumerate(weight_range):
+                    cum_score += create_mod_geom([geom['LSTM'], geom['Dense']], weight)
+                # Append the average score over the weights         
+                scores_geom.append(cum_score/len(weight_range))
+            # Add the scores column to the geometries DataFrame
+            geoms["Mean score"] = scores_geom
+            print("All geoms for testing")
+            print(pd.DataFrame(geoms).sort_values(by="Mean score"))
+            # Selecting the best geometry for further learning rate and batch size optimisation
+            best_geom = pd.DataFrame(geoms).sort_values(by="Mean score").iloc[:1, :].reset_index(drop=True)
+            print("The best selected geometry is:")
+            print(best_geom)
+            best_geom = best_geom.values.tolist()
+            print(best_geom)          
+            # Finding the best embedding size, learning rate, and batch size for the given split 
+            # through Bayesiam optimisation
+            print("***Bayesian Optimization of the training hyperparameters.***\n")
             def create_mod(params):
                 print('Model: {}'.format(params))
 
@@ -244,30 +336,31 @@ def Main(data,
                 if n_gpus > 1:
                     if bridge_type == 'NVLink':
                         model = smimodel.LSTMAttModel.create(inputtokens = max_length+1, 
-                                                    vocabsize = vocab_size, 
-                                                    lstmunits=int(params[:,0][0]), 
-                                                    denseunits = int(params[:,1]), 
-                                                    embedding = int(params[:,2][0]))
+                                                             vocabsize = vocab_size, 
+                                                             lstmunits=int(best_geom[0][0]), 
+                                                             denseunits = int(best_geom[0][1]), 
+                                                             embedding = int(params[:,0][0])
+                                                             )
                     else:
                         with tf.device('/cpu'): # necessary to multi-GPU scaling
                             model = smimodel.LSTMAttModel.create(inputtokens = max_length+1, 
                                                         vocabsize = vocab_size, 
-                                                        lstmunits=int(params[:,0][0]), 
-                                                        denseunits = int(params[:,1]), 
-                                                        embedding = int(params[:,2][0]))
+                                                        lstmunits=int(best_geom[0][0]), 
+                                                        denseunits = int(best_geom[0][1]), 
+                                                        embedding = int(params[:,0][0]))
                             
                     multi_model = smimodel.ModelMGPU(model, gpus=n_gpus, bridge_type=bridge_type)
                 else: # single GPU
                     model = smimodel.LSTMAttModel.create(inputtokens = max_length+1, 
                                                 vocabsize = vocab_size, 
-                                                lstmunits=int(params[:,0][0]), 
-                                                denseunits = int(params[:,1]), 
-                                                embedding = int(params[:,2][0]))
+                                                lstmunits=int(best_geom[0][0]), 
+                                                denseunits = int(best_geom[0][1]), 
+                                                embedding = int(params[:,0][0]))
                     
                     multi_model = model
 
-                batch_size = int(params[:,3][0])
-                custom_adam = Adam(lr=math.pow(10,-float(params[:,4][0])))
+                batch_size = int(params[:,1][0])
+                custom_adam = Adam(lr=math.pow(10,-float(params[:,2][0])))
                 multi_model.compile(loss='mse', optimizer=custom_adam, metrics=[metrics.mae,metrics.mse])
 
                 history = multi_model.fit_generator(generator = DataSequence(x_train_enum_tokens,
@@ -307,7 +400,7 @@ def Main(data,
                                                             num_cores = multiprocessing.cpu_count()-1)
             print("Optimization:\n")
             Bayes_opt.run_optimization(max_iter=bayopt_n_rounds)
-            best_arch = Bayes_opt.x_opt
+            best_arch = best_geom[0][:2] + Bayes_opt.x_opt.tolist()
         else:
             best_arch = [lstmunits_ref, denseunits_ref, embedding_ref, batch_size_ref, alpha_ref]
             
@@ -322,27 +415,27 @@ def Main(data,
         if n_gpus > 1:
             if bridge_type == 'NVLink':
                 model = smimodel.LSTMAttModel.create(inputtokens = max_length+1, 
-                                            vocabsize = vocab_size, 
-                                            lstmunits= int(best_arch[0]), 
-                                            denseunits = int(best_arch[1]), 
-                                            embedding = int(best_arch[2]))
+                                                     vocabsize = vocab_size, 
+                                                     lstmunits= int(best_arch[0]), 
+                                                     denseunits = int(best_arch[1]), 
+                                                     embedding = int(best_arch[2]))
             else:
                 with tf.device('/cpu'):
                     model = smimodel.LSTMAttModel.create(inputtokens = max_length+1, 
-                                                vocabsize = vocab_size, 
-                                                lstmunits= int(best_arch[0]), 
-                                                denseunits = int(best_arch[1]), 
-                                                embedding = int(best_arch[2]))
+                                                         vocabsize = vocab_size, 
+                                                         lstmunits= int(best_arch[0]), 
+                                                         denseunits = int(best_arch[1]), 
+                                                         embedding = int(best_arch[2]))
             print("Best model summary:\n")
             print(model.summary())
             print("\n")
             multi_model = smimodel.ModelMGPU(model, gpus=n_gpus, bridge_type=bridge_type)
         else:
             model = smimodel.LSTMAttModel.create(inputtokens = max_length+1, 
-                                        vocabsize = vocab_size, 
-                                        lstmunits= int(best_arch[0]), 
-                                        denseunits = int(best_arch[1]), 
-                                        embedding = int(best_arch[2]))
+                                                 vocabsize = vocab_size, 
+                                                 lstmunits= int(best_arch[0]), 
+                                                 denseunits = int(best_arch[1]), 
+                                                 embedding = int(best_arch[2]))
 
             print("Best model summary:\n")
             print(model.summary())
