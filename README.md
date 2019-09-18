@@ -52,6 +52,7 @@ Then, install the following dependencies in your RDKit conda environment (e.g. m
 * scipy >= 1.3.0
 * Keras >= 2.2.4
 * tensorflow-gpu >= 1.12.0
+* pygmo
 
 ## Usage
 The following instruction is a summary from the python notebooks `SMILESX_Prediction_github.ipynb` and `SMILESX_Visualization_github.ipynb` available above. Please feel free to download, use and modify them. 
