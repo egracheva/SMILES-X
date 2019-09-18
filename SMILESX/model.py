@@ -33,7 +33,8 @@ class AttentionM(Layer):
         enc = LSTM(EMBED_SIZE, return_sequences=True)(...)
         att = AttentionM()(enc)
     """    
-    def __init__(self, return_probabilities = False, **kwargs):
+    def __init__(self, weight, return_probabilities = False, **kwargs):
+        self.weight = weight
         self.return_probabilities = return_probabilities
         super(AttentionM, self).__init__(**kwargs)
 
@@ -94,7 +95,7 @@ class LSTMAttModel():
     # Returns: 
     #         a model in the Keras API format
     @staticmethod
-    def create(inputtokens, vocabsize, lstmunits=16, denseunits=16, embedding=32, return_proba = False):
+    def create(inputtokens, vocabsize, weight, lstmunits=16, denseunits=16, embedding=32, return_proba = False):
 
         input_ = Input(shape=(inputtokens,), dtype='int32')
 
@@ -104,11 +105,13 @@ class LSTMAttModel():
                         input_length=inputtokens)(input_)
 
         # Bidirectional LSTM layer
-        net = Bidirectional(CuDNNLSTM(lstmunits, return_sequences=True))(net)
+        net = Bidirectional(CuDNNLSTM(lstmunits, 
+                                      return_sequences=True))(net)
         net = TimeDistributed(Dense(denseunits))(net)
-        net = AttentionM(return_probabilities=return_proba)(net)
+        net = AttentionM(weight=weight, return_probabilities=return_proba)(net)
 
         # Output layer
+        # net = Dense(1, activation="linear", kernel_initializer=initializers.glorot_normal())(net)
         net = Dense(1, activation="linear")(net)
         model = Model(inputs=input_, outputs=net)
 
@@ -137,7 +140,8 @@ class AttentionMNoTrain(Layer):
         self.W = self.add_weight(name="W_{:s}".format(self.name), 
                                  shape=(input_shape[-1], 1),
                                  # initializer=initializers.constant(value=self.weight))
-                                 initializer=initializers.random_normal(mean=self.weight, stddev=0.05, seed=123))
+                                 # initializer=initializers.random_normal(mean=self.weight, stddev=0.05, seed=123))
+                                 initializer=initializers.glorot_normal(seed=self.weight))
         self.b = self.add_weight(name="b_{:s}".format(self.name),
                                  shape=(input_shape[1], 1),
                                  initializer="zeros")
@@ -197,23 +201,29 @@ class LSTMAttModelNoTrain():
         net = Embedding(input_dim=vocabsize, 
                         output_dim=embedding, 
                         input_length=inputtokens,
-                        #embeddings_initializer=initializers.random_normal(mean=weight))(input_)
-                        embeddings_initializer=initializers.random_normal(mean=weight, stddev=0.05, seed=123))(input_)
+                        # embeddings_initializer=initializers.constant(value=weight))(input_)
+                        # embeddings_initializer=initializers.random_normal(mean=weight, stddev=0.05, seed=123))(input_)
+                        embeddings_initializer=initializers.glorot_normal(seed=weight))(input_)
 
         # Bidirectional LSTM layer
         net = Bidirectional(CuDNNLSTM(lstmunits, 
                             return_sequences=True, 
                             # kernel_initializer=initializers.constant(value=weight),
                             # recurrent_initializer=initializers.constant(value=weight)))(net)
-                            kernel_initializer=initializers.random_normal(mean=weight, stddev=0.05, seed=123),
-                            recurrent_initializer=initializers.random_normal(mean=weight, stddev=0.05, seed=123)))(net)
-        net = TimeDistributed(Dense(denseunits, kernel_initializer=initializers.random_normal(mean=weight, stddev=0.05, seed=123)))(net)
+                            # kernel_initializer=initializers.random_normal(mean=weight, stddev=0.05, seed=123),
+                            # recurrent_initializer=initializers.random_normal(mean=weight, stddev=0.05, seed=123)))(net)
+                            kernel_initializer=initializers.glorot_normal(seed=weight),
+                            recurrent_initializer=initializers.glorot_normal(seed=weight)))(net)
         # net = TimeDistributed(Dense(denseunits, kernel_initializer=initializers.constant(value=weight)))(net)
+        # net = TimeDistributed(Dense(denseunits, kernel_initializer=initializers.random_normal(mean=weight, stddev=0.05, seed=123)))(net)
+        net = TimeDistributed(Dense(denseunits, kernel_initializer=initializers.glorot_normal(seed=weight)))(net)
         net = AttentionMNoTrain(weight=weight, return_probabilities=return_proba)(net)
 
         # Output layer
-        net = Dense(1, activation="linear", kernel_initializer=initializers.random_normal(mean=weight, stddev=0.05, seed=123))(net)
-        # net = Dense(1, activation="linear", kernel_initializer=initializers.random_normal(mean=weight))(net)
+        # net = Dense(1, activation="linear", kernel_initializer=initializers.constant(value=weight))(net)
+        # net = Dense(1, activation="linear", kernel_initializer=initializers.random_normal(mean=weight, stddev=0.05, seed=123))(net)
+        net = Dense(1, activation="linear", kernel_initializer=initializers.glorot_normal(seed=weight))(net)
+        
         model = Model(inputs=input_, outputs=net)
 
         return model
