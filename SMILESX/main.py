@@ -26,6 +26,7 @@ from sklearn.metrics import r2_score
 from sklearn.metrics import mean_squared_error
 
 from SMILESX import utils, token, augm, model
+import pygmo as pg
 
 np.set_printoptions(precision=3)
 # 
@@ -135,6 +136,7 @@ def Main(data,
          embedding_ref = 2,
          batch_size_ref = 64,
          alpha_ref = 2.8,
+         best_weight = -0.5,
          patience = 50,
          n_epochs = 100):
     
@@ -240,41 +242,7 @@ def Main(data,
         if bayopt_on:
             # Operate the first step of the optimization:
             # geometry optimization (number of units in LSTM and Dense layers)
-            def create_mod_geom(params, weight):
-                K.clear_session()
-
-                if n_gpus > 1:
-                    if bridge_type == 'NVLink':
-                        model_geom = model.LSTMAttModelNoTrain.create(inputtokens=max_length+1, 
-                                                                      vocabsize=vocab_size,
-                                                                      weight=weight,
-                                                                      lstmunits=int(params[0]), 
-                                                                      denseunits=int(params[1]), 
-                                                                      embedding=3
-                                                                      )
-                    else:
-                        with tf.device('/cpu'): # necessary to multi-GPU scaling
-                            model_geom = model.LSTMAttModelNoTrain.create(inputtokens = max_length+1, 
-                                                                          vocabsize=vocab_size,
-                                                                          weight=weight,
-                                                                          lstmunits=int(params[0]), 
-                                                                          denseunits=int(params[1]), 
-                                                                          embedding=3
-                                                                          )
-                            
-                    multi_model = model.ModelMGPU(model_geom, gpus=n_gpus, bridge_type=bridge_type)
-                else: # single GPU
-                    model_geom = model.LSTMAttModelNoTrain.create(inputtokens = max_length+1, 
-                                                                  vocabsize=vocab_size,
-                                                                  weight=weight, 
-                                                                  lstmunits=int(params[0]),
-                                                                  denseunits=int(params[1]), 
-                                                                  embedding=3
-                                                                  )
-                    
-                    multi_model = model_geom
-                # Compiling the model
-                multi_model.compile(loss='mse', optimizer='sgd')
+            def create_mod_geom(params, weight_range):
                 # Prepare the data for the evaluation
                 x_train_enum_tokens_tointvec = token.int_vec_encode(tokenized_smiles_list = x_train_enum_tokens, 
                                                max_length = max_length+1, 
@@ -285,44 +253,125 @@ def Main(data,
                 # Evaluation of the untrained model is performed on both training and validation data merged together
                 x_geom_enum_tokens_tointvec = np.concatenate((x_train_enum_tokens_tointvec, x_valid_enum_tokens_tointvec), axis = 0)
                 y_geom_enum                 = np.concatenate((y_train_enum, y_valid_enum), axis = 0)
+                pred_scores = []
+                for i, weight in enumerate(weight_range):
+                    #Changing weight into seed for the test
+                    weight = weight*2+5
+                    K.clear_session()
 
-                y_geom_pred = model_geom.predict(x_geom_enum_tokens_tointvec, verbose=0)
+                    if n_gpus > 1:
+                        if bridge_type == 'NVLink':
+                            model_geom = model.LSTMAttModelNoTrain.create(inputtokens=max_length+1, 
+                                                                          vocabsize=vocab_size,
+                                                                          weight=weight,
+                                                                          lstmunits=int(params[0]), 
+                                                                          denseunits=int(params[1]), 
+                                                                          embedding=3
+                                                                          )
+                        else:
+                            with tf.device('/cpu'): # necessary to multi-GPU scaling
+                                model_geom = model.LSTMAttModelNoTrain.create(inputtokens = max_length+1, 
+                                                                              vocabsize=vocab_size,
+                                                                              weight=weight,
+                                                                              lstmunits=int(params[0]), 
+                                                                              denseunits=int(params[1]), 
+                                                                              embedding=3
+                                                                              )
+                                
+                        multi_model = model.ModelMGPU(model_geom, gpus=n_gpus, bridge_type=bridge_type)
+                    else: # single GPU
+                        model_geom = model.LSTMAttModelNoTrain.create(inputtokens = max_length+1, 
+                                                                      vocabsize=vocab_size,
+                                                                      weight=weight, 
+                                                                      lstmunits=int(params[0]),
+                                                                      denseunits=int(params[1]), 
+                                                                      embedding=3
+                                                                      )
+                        
+                        multi_model = model_geom
+                    # Compiling the model
+                    multi_model.compile(loss='mse', optimizer='sgd')
+                    y_geom_pred = model_geom.predict(x_geom_enum_tokens_tointvec, verbose=0)
 
-                score = np.sqrt(mean_squared_error(y_geom_enum, y_geom_pred))
-     
-                return score
+                    score = np.sqrt(mean_squared_error(scaler.inverse_transform(y_geom_enum), scaler.inverse_transform(y_geom_pred)))
+                    pred_scores.append(score)
+                # print(pred_scores)
+                mean_score = np.mean(pred_scores)
+                best_score = np.min(pred_scores)
+                best_weight = weight_range[np.argmin(pred_scores)]
+                n_nodes = model_geom.count_params()
+                print(pred_scores)
+         
+                return [mean_score, best_score, best_weight, n_nodes]
 
             print("***Geometry search.***")
             # start = time.time()
-            # Prepare the list of all possible geometry combinations in one Pandas DataFrame
-            geoms = []
-            for lstm in geom_bounds[0]:
-                for denseunits in geom_bounds[1]:
-                    geoms.append([lstm, denseunits])
-            geoms = pd.DataFrame(geoms)
-            geoms.columns = ['LSTM', 'Dense']
-
             # Test each geometry using the single shared weight (all the weights are set to constant)
             # The score is evaluated over the mean of the sulting predictions
             # This is the way to test each geometry for "compatibility" with the data -- without training the model
             # Read more in David Ha's article
-            scores_geom = []
-            for _, geom in geoms.iterrows():
-                cum_score = 0
-                for i, weight in enumerate(weight_range):
-                    cum_score += create_mod_geom([geom['LSTM'], geom['Dense']], weight)
-                # Append the average score over the weights         
-                scores_geom.append(cum_score/len(weight_range))
-            # Add the scores column to the geometries DataFrame
-            geoms["Mean score"] = scores_geom
-            print("All geoms for testing")
-            print(pd.DataFrame(geoms).sort_values(by="Mean score"))
-            # Selecting the best geometry for further learning rate and batch size optimisation
-            best_geom = pd.DataFrame(geoms).sort_values(by="Mean score").iloc[:1, :].reset_index(drop=True)
-            print("The best selected geometry is:")
-            print(best_geom)
-            best_geom = best_geom.values.tolist()
-            print(best_geom)          
+            scores = []
+            for n_lstm in geom_bounds[0]:
+                for n_dense in geom_bounds[1]:
+                    #mean_score, best_score, best_weight, n_nodes = create_mod_geom([n_lstm, n_dense], weight_range)
+                    scores.append([n_lstm, n_dense] + create_mod_geom([n_lstm, n_dense], weight_range))
+            scores = np.array(scores)
+            print("Original scores")
+            print(pd.DataFrame(scores))
+            # Multistage sorting procedure
+            # Firstly, sort based on mean score over weights and model complexity
+            points = scores[:, [2, 3, 5]].tolist()
+            print("This should be mean and nodes")
+            print(points)
+            sort_ind = pg.sort_population_mo(points)
+            print("This are sorting indices after the first iteration")
+            print(sort_ind)
+            print("And re-ordered scores...")
+            print(pd.DataFrame(scores[sort_ind]))
+
+            # Then, take 50% best geometries and sort taking into account their mean and best achieved scores
+            print("Keep 50% best")
+            twenty_perc = int(np.ceil(len(scores)*0.50))
+            scores2 = scores[sort_ind[:twenty_perc]]
+            print("New scores: scores2")
+            print(pd.DataFrame(scores2))
+            points2 = scores2[:, [2, 3]].tolist()
+            print("This time it should be mean and min")
+            print(points2)
+            sort_ind2 = pg.sort_population_mo(points2)
+            print("New sorting indices: points2")
+            print(sort_ind2)
+
+            # Let's try iterating
+            twenty_perc = int(np.ceil(len(scores2)*0.50))
+            scores3 = scores2[sort_ind2[:twenty_perc]]
+            print(pd.DataFrame(scores3))
+            points3 = scores3[:, [2, 5]].tolist()
+            sort_ind3 = pg.sort_population_mo(points3)
+
+            # And again
+            twenty_perc = int(np.ceil(len(scores3)*0.50))
+            scores4 = scores3[sort_ind3[:twenty_perc]]
+            print(pd.DataFrame(scores4))
+            points4 = scores4[:, [2, 3]].tolist()
+            sort_ind4 = pg.sort_population_mo(points4)
+
+            # And again
+            twenty_perc = int(np.ceil(len(scores4)*0.50))
+            scores5 = scores4[sort_ind4[:twenty_perc]]
+            print(pd.DataFrame(scores5))
+            points5 = scores5[:, [2, 5]].tolist()
+            sort_ind5 = pg.sort_population_mo(points5)
+
+            # Select the best geometry for further learning rate and batch size optimisation
+            best_geom = scores5[sort_ind5[0], :2]
+            best_weight = scores5[sort_ind5[0], 4]
+            print("The best untrained RMSE is:")
+            print(scores5[sort_ind5[0], 3])
+            print("Which is achieved using the weight of {}".format(best_weight))
+            print("\nThe best selected geometry is:\n\tLSTM units: {}\n\tDense units: {}".\
+                  format(best_geom[0], best_geom[1]))
+            # print(pd.DataFrame(scores4[sort_ind4]))
             # Finding the best embedding size, learning rate, and batch size for the given split 
             # through Bayesiam optimisation
             print("***Bayesian Optimization of the training hyperparameters.***\n")
@@ -337,24 +386,27 @@ def Main(data,
                     if bridge_type == 'NVLink':
                         model_opt = model.LSTMAttModel.create(inputtokens = max_length+1, 
                                                               vocabsize = vocab_size, 
-                                                              lstmunits=int(best_geom[0][0]), 
-                                                              denseunits = int(best_geom[0][1]), 
+                                                              weight=best_weight,
+                                                              lstmunits=int(best_geom[0]), 
+                                                              denseunits = int(best_geom[1]), 
                                                               embedding = int(params[:,0][0]))
                     else:
                         with tf.device('/cpu'): # necessary to multi-GPU scaling
                             model_opt = model.LSTMAttModel.create(inputtokens = max_length+1, 
-                                                                  vocabsize = vocab_size, 
-                                                                  lstmunits=int(best_geom[0][0]), 
-                                                                  denseunits = int(best_geom[0][1]), 
+                                                                  vocabsize = vocab_size,
+                                                                  weight=best_weight,
+                                                                  lstmunits=int(best_geom[0]), 
+                                                                  denseunits = int(best_geom[1]), 
                                                                   embedding = int(params[:,0][0]))
                             
                     multi_model = model.ModelMGPU(model_opt, gpus=n_gpus, bridge_type=bridge_type)
                 else: # single GPU
 
                     model_opt = model.LSTMAttModel.create(inputtokens = max_length+1, 
-                                                          vocabsize = vocab_size, 
-                                                          lstmunits=int(best_geom[0][0]), 
-                                                          denseunits = int(best_geom[0][1]), 
+                                                          vocabsize = vocab_size,
+                                                          weight=best_weight,
+                                                          lstmunits=int(best_geom[0]), 
+                                                          denseunits = int(best_geom[1]), 
                                                           embedding = int(params[:,0][0]))
                     
                     multi_model = model_opt
@@ -400,7 +452,7 @@ def Main(data,
                                                             num_cores = multiprocessing.cpu_count()-1)
             print("Optimization:\n")
             Bayes_opt.run_optimization(max_iter=bayopt_n_rounds)
-            best_arch = best_geom[0][:2] + Bayes_opt.x_opt.tolist()
+            best_arch = best_geom.tolist() + Bayes_opt.x_opt.tolist()
         else:
             best_arch = [lstmunits_ref, denseunits_ref, embedding_ref, batch_size_ref, alpha_ref]
             
@@ -410,20 +462,22 @@ def Main(data,
         
         print("***Training of the best model.***\n")
         # Train the model and predict
-        K.clear_session()   
+        K.clear_session()  
         # Define the multi-gpus model if necessary
         if n_gpus > 1:
             if bridge_type == 'NVLink':
 
                 model_train = model.LSTMAttModel.create(inputtokens = max_length+1, 
-                                                        vocabsize = vocab_size, 
+                                                        vocabsize = vocab_size,
+                                                        weight=best_weight,
                                                         lstmunits= int(best_arch[0]), 
                                                         denseunits = int(best_arch[1]), 
                                                         embedding = int(best_arch[2]))
             else:
                 with tf.device('/cpu'):
                     model_train = model.LSTMAttModel.create(inputtokens = max_length+1, 
-                                                            vocabsize = vocab_size, 
+                                                            vocabsize = vocab_size,
+                                                            weight=best_weight,
                                                             lstmunits= int(best_arch[0]), 
                                                             denseunits = int(best_arch[1]), 
                                                             embedding = int(best_arch[2]))
@@ -435,7 +489,8 @@ def Main(data,
         else:
 
             model_train = model.LSTMAttModel.create(inputtokens = max_length+1, 
-                                                    vocabsize = vocab_size, 
+                                                    vocabsize = vocab_size,
+                                                    weight=best_weight,
                                                     lstmunits= int(best_arch[0]), 
                                                     denseunits = int(best_arch[1]), 
                                                     embedding = int(best_arch[2]))
