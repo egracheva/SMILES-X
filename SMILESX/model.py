@@ -11,7 +11,6 @@ from keras.utils import multi_gpu_model
 
 from keras import backend as K
 from keras import initializers
-# import tensorflow as tf
 
 # #from keras.backend.tensorflow_backend import set_session
 # config = tf.ConfigProto()
@@ -44,7 +43,7 @@ class AttentionM(Layer):
         # b: (MAX_TIMESTEPS,)
         self.W = self.add_weight(name="W_{:s}".format(self.name), 
                                  shape=(input_shape[-1], 1),
-                                 initializer="normal")
+                                 initializer=initializers.glorot_normal(seed=self.weight))
         self.b = self.add_weight(name="b_{:s}".format(self.name),
                                  shape=(input_shape[1], 1),
                                  initializer="zeros")
@@ -102,18 +101,22 @@ class LSTMAttModel():
         # Embedding layer
         net = Embedding(input_dim=vocabsize, 
                         output_dim=embedding, 
-                        input_length=inputtokens)(input_)
+                        input_length=inputtokens,
+                        embeddings_initializer=initializers.glorot_normal(seed=weight))(input_)
 
         # Bidirectional LSTM layer
         net = Bidirectional(CuDNNLSTM(lstmunits, 
-                                      return_sequences=True))(net)
-        net = TimeDistributed(Dense(denseunits))(net)
-        net = AttentionM(weight=weight, return_probabilities=return_proba)(net)
+                            return_sequences=True, 
+                            kernel_initializer=initializers.glorot_normal(seed=weight),
+                            recurrent_initializer=initializers.glorot_normal(seed=weight)))(net)
+        net = TimeDistributed(Dense(denseunits, kernel_initializer=initializers.glorot_normal(seed=weight)))(net)
+        net = AttentionMNoTrain(weight=weight, return_probabilities=return_proba)(net)
 
         # Output layer
-        # net = Dense(1, activation="linear", kernel_initializer=initializers.glorot_normal())(net)
-        net = Dense(1, activation="linear")(net)
+        net = Dense(1, activation="linear", kernel_initializer=initializers.glorot_normal(seed=weight))(net)
+        
         model = Model(inputs=input_, outputs=net)
+
 
         return model
 ##
