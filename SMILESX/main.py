@@ -162,10 +162,9 @@ def Main(data,
         selection_seed = seed_list[ifold]
         x_train, x_valid, x_test, y_train, y_valid, y_test, scaler = \
         utils.random_split(smiles_input=data.smiles, 
-                           prop_input=np.array(data.iloc[:,1]), 
-                           random_state=selection_seed, 
+                           prop_input=np.array(data.iloc[:,1]),
+                           random_state = selection_seed,
                            scaling = True)
-
         # data augmentation or not
         if augmentation == True:
             print("***Data augmentation to {}***\n".format(augmentation))
@@ -256,7 +255,8 @@ def Main(data,
                 pred_scores = []
                 for i, weight in enumerate(weight_range):
                     #Changing weight into seed for the test
-                    weight = weight*2+5
+                    # weight = weight*2+5
+                    # print(weight)
                     K.clear_session()
 
                     if n_gpus > 1:
@@ -292,16 +292,12 @@ def Main(data,
                     # Compiling the model
                     multi_model.compile(loss='mse', optimizer='sgd')
                     y_geom_pred = model_geom.predict(x_geom_enum_tokens_tointvec, verbose=0)
-
                     score = np.sqrt(mean_squared_error(scaler.inverse_transform(y_geom_enum), scaler.inverse_transform(y_geom_pred)))
                     pred_scores.append(score)
-                # print(pred_scores)
                 mean_score = np.mean(pred_scores)
                 best_score = np.min(pred_scores)
                 best_weight = weight_range[np.argmin(pred_scores)]
                 n_nodes = model_geom.count_params()
-                print(pred_scores)
-         
                 return [mean_score, best_score, best_weight, n_nodes]
 
             print("***Geometry search.***")
@@ -316,62 +312,60 @@ def Main(data,
                     #mean_score, best_score, best_weight, n_nodes = create_mod_geom([n_lstm, n_dense], weight_range)
                     scores.append([n_lstm, n_dense] + create_mod_geom([n_lstm, n_dense], weight_range))
             scores = np.array(scores)
-            print("Original scores")
-            print(pd.DataFrame(scores))
             # Multistage sorting procedure
-            # Firstly, sort based on mean score over weights and model complexity
-            points = scores[:, [2, 3, 5]].tolist()
-            print("This should be mean and nodes")
-            print(points)
+            # Firstly, sort based on mean score and best score over weights
+            points = scores[:, [2, 3]].tolist()
             sort_ind = pg.sort_population_mo(points)
-            print("This are sorting indices after the first iteration")
-            print(sort_ind)
-            print("And re-ordered scores...")
+            print("Re-ordered scores")
             print(pd.DataFrame(scores[sort_ind]))
 
-            # Then, take 50% best geometries and sort taking into account their mean and best achieved scores
-            print("Keep 50% best")
-            twenty_perc = int(np.ceil(len(scores)*0.50))
-            scores2 = scores[sort_ind[:twenty_perc]]
-            print("New scores: scores2")
-            print(pd.DataFrame(scores2))
-            points2 = scores2[:, [2, 3]].tolist()
-            print("This time it should be mean and min")
-            print(points2)
-            sort_ind2 = pg.sort_population_mo(points2)
-            print("New sorting indices: points2")
-            print(sort_ind2)
+            # Then, take 20% best geometries and sort taking into account their mean and best achieved scores
+            # print("Keep 20% best")
+            # twenty_perc = int(np.ceil(len(scores)*0.20))
+            # scores2 = scores[sort_ind[:twenty_perc]]
+            # print("New sorted scores: scores2")
+            # points2 = scores2[:, [2, 3]].tolist()
+            # sort_ind2 = pg.sort_population_mo(points2)
+            # print(scores2[sort_ind2])
 
-            # Let's try iterating
-            twenty_perc = int(np.ceil(len(scores2)*0.50))
-            scores3 = scores2[sort_ind2[:twenty_perc]]
-            print(pd.DataFrame(scores3))
-            points3 = scores3[:, [2, 5]].tolist()
-            sort_ind3 = pg.sort_population_mo(points3)
+            # points = scores[:, [2, 3, 5]].tolist()
+            # print("This should be mean, mins and nodes")
+            # print(points)
+            # sort_ind = pg.sort_population_mo(points)
+            # print("This are sorting indices after the first iteration")
+            # print(sort_ind)
+            # print("And re-ordered scores...")
+            # print(pd.DataFrame(scores[sort_ind]))
 
-            # And again
-            twenty_perc = int(np.ceil(len(scores3)*0.50))
-            scores4 = scores3[sort_ind3[:twenty_perc]]
-            print(pd.DataFrame(scores4))
-            points4 = scores4[:, [2, 3]].tolist()
-            sort_ind4 = pg.sort_population_mo(points4)
+            # # Let's try iterating
+            # twenty_perc = int(np.ceil(len(scores2)*0.50))
+            # scores3 = scores2[sort_ind2[:twenty_perc]]
+            # print(pd.DataFrame(scores3))
+            # points3 = scores3[:, [2, 5]].tolist()
+            # sort_ind3 = pg.sort_population_mo(points3)
 
-            # And again
-            twenty_perc = int(np.ceil(len(scores4)*0.50))
-            scores5 = scores4[sort_ind4[:twenty_perc]]
-            print(pd.DataFrame(scores5))
-            points5 = scores5[:, [2, 5]].tolist()
-            sort_ind5 = pg.sort_population_mo(points5)
+            # # And again
+            # twenty_perc = int(np.ceil(len(scores3)*0.50))
+            # scores4 = scores3[sort_ind3[:twenty_perc]]
+            # print(pd.DataFrame(scores4))
+            # points4 = scores4[:, [2, 3]].tolist()
+            # sort_ind4 = pg.sort_population_mo(points4)
+
+            # # And again
+            # twenty_perc = int(np.ceil(len(scores4)*0.50))
+            # scores5 = scores4[sort_ind4[:twenty_perc]]
+            # print(pd.DataFrame(scores5))
+            # points5 = scores5[:, [2, 5]].tolist()
+            # sort_ind5 = pg.sort_population_mo(points5)
 
             # Select the best geometry for further learning rate and batch size optimisation
-            best_geom = scores5[sort_ind5[0], :2]
-            best_weight = scores5[sort_ind5[0], 4]
+            best_geom = scores[sort_ind[0], :2]
+            best_weight = scores[sort_ind[0], 4]
             print("The best untrained RMSE is:")
-            print(scores5[sort_ind5[0], 3])
+            print(scores[sort_ind[0], 3])
             print("Which is achieved using the weight of {}".format(best_weight))
             print("\nThe best selected geometry is:\n\tLSTM units: {}\n\tDense units: {}".\
                   format(best_geom[0], best_geom[1]))
-            # print(pd.DataFrame(scores4[sort_ind4]))
             # Finding the best embedding size, learning rate, and batch size for the given split 
             # through Bayesiam optimisation
             print("***Bayesian Optimization of the training hyperparameters.***\n")
