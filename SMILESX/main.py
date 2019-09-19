@@ -162,8 +162,8 @@ def Main(data,
         x_train, x_valid, x_test, y_train, y_valid, y_test, scaler = \
         utils.random_split(smiles_input=data.smiles, 
                            prop_input=np.array(data.iloc[:,1]), 
-                           random_state=seed_list[ifold],
-                           scaling = True)
+                           random_state=seed_list[ifold]
+,                           scaling = True)
         # data augmentation or not
         if augmentation == True:
             print("***Data augmentation to {}***\n".format(augmentation))
@@ -265,7 +265,7 @@ def Main(data,
                                                                           weight=weight,
                                                                           lstmunits=int(params[0]), 
                                                                           denseunits=int(params[1]), 
-                                                                          embedding=3
+                                                                          embedding=int(params[2])
                                                                           )
                         else:
                             with tf.device('/cpu'): # necessary to multi-GPU scaling
@@ -274,7 +274,7 @@ def Main(data,
                                                                               weight=weight,
                                                                               lstmunits=int(params[0]), 
                                                                               denseunits=int(params[1]), 
-                                                                              embedding=3
+                                                                              embedding=int(params[2])
                                                                               )
                                 
                         multi_model = model.ModelMGPU(model_geom, gpus=n_gpus, bridge_type=bridge_type)
@@ -282,9 +282,9 @@ def Main(data,
                         model_geom = model.LSTMAttModelNoTrain.create(inputtokens = max_length+1, 
                                                                       vocabsize=vocab_size,
                                                                       weight=weight, 
-                                                                      lstmunits=int(params[0]),
+                                                                      lstmunits=int(params[0]), 
                                                                       denseunits=int(params[1]), 
-                                                                      embedding=3
+                                                                      embedding=int(params[2])
                                                                       )
                         
                         multi_model = model_geom
@@ -295,9 +295,10 @@ def Main(data,
                     pred_scores.append(score)
                 mean_score = np.mean(pred_scores)
                 best_score = np.min(pred_scores)
+                sigma_score = np.std(pred_scores)
                 best_weight = weight_range[np.argmin(pred_scores)]
                 n_nodes = model_geom.count_params()
-                return [mean_score, best_score, best_weight, n_nodes]
+                return [mean_score, sigma_score, best_score, best_weight, n_nodes]
 
             print("***Geometry search.***")
             # start = time.time()
@@ -308,13 +309,15 @@ def Main(data,
             scores = []
             for n_lstm in geom_bounds[0]:
                 for n_dense in geom_bounds[1]:
-                    #mean_score, best_score, best_weight, n_nodes = create_mod_geom([n_lstm, n_dense], weight_range)
-                    scores.append([n_lstm, n_dense] + create_mod_geom([n_lstm, n_dense], weight_range))
+                    for n_embed in geom_bounds[2]:
+                      scores.append([n_lstm, n_dense, n_embed] + create_mod_geom([n_lstm, n_dense, n_embed], weight_range))
             scores = np.array(scores)
-            # Multistage sorting procedure
-            # Firstly, sort based on mean score and best score over weights
-            points = scores[:, [2, 3]].tolist()
+            ## Multistage sorting procedure
+            ## Firstly, sort based on mean score and best score over weights
+            points = scores[:, [3, 4, 7]].tolist()
             sort_ind = pg.sort_population_mo(points)
+            print("Unordered scores")
+            print(pd.DataFrame(scores))
             print("Re-ordered scores")
             print(pd.DataFrame(scores[sort_ind]))
 
@@ -358,13 +361,13 @@ def Main(data,
             # sort_ind5 = pg.sort_population_mo(points5)
 
             # Select the best geometry for further learning rate and batch size optimisation
-            best_geom = scores[sort_ind[0], :2]
-            best_weight = scores[sort_ind[0], 4]
+            best_geom = scores[sort_ind[0], :3]
+            best_weight = scores[sort_ind[0], 6]
             print("The best untrained RMSE is:")
-            print(scores[sort_ind[0], 3])
+            print(scores[sort_ind[0], 5])
             print("Which is achieved using the weight of {}".format(best_weight))
-            print("\nThe best selected geometry is:\n\tLSTM units: {}\n\tDense units: {}".\
-                  format(best_geom[0], best_geom[1]))
+            print("\nThe best selected geometry is:\n\tLSTM units: {}\n\tDense units: {}\n\tEmbedding {}".\
+                  format(best_geom[0], best_geom[1], best_geom[2]))
             # Finding the best embedding size, learning rate, and batch size for the given split 
             # through Bayesiam optimisation
             print("***Bayesian Optimization of the training hyperparameters.***\n")
@@ -382,7 +385,7 @@ def Main(data,
                                                               weight=best_weight,
                                                               lstmunits=int(best_geom[0]), 
                                                               denseunits = int(best_geom[1]), 
-                                                              embedding = int(params[:,0][0]))
+                                                              embedding = int(best_geom[2]))
                     else:
                         with tf.device('/cpu'): # necessary to multi-GPU scaling
                             model_opt = model.LSTMAttModel.create(inputtokens = max_length+1, 
@@ -390,7 +393,7 @@ def Main(data,
                                                                   weight=best_weight,
                                                                   lstmunits=int(best_geom[0]), 
                                                                   denseunits = int(best_geom[1]), 
-                                                                  embedding = int(params[:,0][0]))
+                                                                  embedding = int(best_geom[2]))
                             
                     multi_model = model.ModelMGPU(model_opt, gpus=n_gpus, bridge_type=bridge_type)
                 else: # single GPU
@@ -400,12 +403,12 @@ def Main(data,
                                                           weight=best_weight,
                                                           lstmunits=int(best_geom[0]), 
                                                           denseunits = int(best_geom[1]), 
-                                                          embedding = int(params[:,0][0]))
+                                                          embedding = int(best_geom[2]))
                     
                     multi_model = model_opt
 
-                batch_size = int(params[:,1][0])
-                custom_adam = Adam(lr=math.pow(10,-float(params[:,2][0])))
+                batch_size = int(params[:,0][0])
+                custom_adam = Adam(lr=math.pow(10,-float(params[:,1][0])))
                 multi_model.compile(loss='mse', optimizer=custom_adam, metrics=[metrics.mae,metrics.mse])
 
                 history = multi_model.fit_generator(generator = DataSequence(x_train_enum_tokens,
