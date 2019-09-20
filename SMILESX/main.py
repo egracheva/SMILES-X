@@ -321,45 +321,6 @@ def Main(data,
             print("Re-ordered scores")
             print(pd.DataFrame(scores[sort_ind]))
 
-            # Then, take 20% best geometries and sort taking into account their mean and best achieved scores
-            # print("Keep 20% best")
-            # twenty_perc = int(np.ceil(len(scores)*0.20))
-            # scores2 = scores[sort_ind[:twenty_perc]]
-            # print("New sorted scores: scores2")
-            # points2 = scores2[:, [2, 3]].tolist()
-            # sort_ind2 = pg.sort_population_mo(points2)
-            # print(scores2[sort_ind2])
-
-            # points = scores[:, [2, 3, 5]].tolist()
-            # print("This should be mean, mins and nodes")
-            # print(points)
-            # sort_ind = pg.sort_population_mo(points)
-            # print("This are sorting indices after the first iteration")
-            # print(sort_ind)
-            # print("And re-ordered scores...")
-            # print(pd.DataFrame(scores[sort_ind]))
-
-            # # Let's try iterating
-            # twenty_perc = int(np.ceil(len(scores2)*0.50))
-            # scores3 = scores2[sort_ind2[:twenty_perc]]
-            # print(pd.DataFrame(scores3))
-            # points3 = scores3[:, [2, 5]].tolist()
-            # sort_ind3 = pg.sort_population_mo(points3)
-
-            # # And again
-            # twenty_perc = int(np.ceil(len(scores3)*0.50))
-            # scores4 = scores3[sort_ind3[:twenty_perc]]
-            # print(pd.DataFrame(scores4))
-            # points4 = scores4[:, [2, 3]].tolist()
-            # sort_ind4 = pg.sort_population_mo(points4)
-
-            # # And again
-            # twenty_perc = int(np.ceil(len(scores4)*0.50))
-            # scores5 = scores4[sort_ind4[:twenty_perc]]
-            # print(pd.DataFrame(scores5))
-            # points5 = scores5[:, [2, 5]].tolist()
-            # sort_ind5 = pg.sort_population_mo(points5)
-
             # Select the best geometry for further learning rate and batch size optimisation
             best_geom = scores[sort_ind[0], :3]
             best_weight = scores[sort_ind[0], 6]
@@ -375,66 +336,69 @@ def Main(data,
                 print('Model: {}'.format(params))
 
                 model_tag = data_name
+                mseValidRuns = []
+                for run in range(0, 1):
+                    K.clear_session()
 
-                K.clear_session()
-
-                if n_gpus > 1:
-                    if bridge_type == 'NVLink':
-                        model_opt = model.LSTMAttModel.create(inputtokens = max_length+1, 
-                                                              vocabsize = vocab_size, 
-                                                              weight=best_weight,
-                                                              lstmunits=int(best_geom[0]), 
-                                                              denseunits = int(best_geom[1]), 
-                                                              embedding = int(best_geom[2]))
-                    else:
-                        with tf.device('/cpu'): # necessary to multi-GPU scaling
+                    if n_gpus > 1:
+                        if bridge_type == 'NVLink':
                             model_opt = model.LSTMAttModel.create(inputtokens = max_length+1, 
-                                                                  vocabsize = vocab_size,
+                                                                  vocabsize = vocab_size, 
                                                                   weight=best_weight,
                                                                   lstmunits=int(best_geom[0]), 
                                                                   denseunits = int(best_geom[1]), 
                                                                   embedding = int(best_geom[2]))
-                            
-                    multi_model = model.ModelMGPU(model_opt, gpus=n_gpus, bridge_type=bridge_type)
-                else: # single GPU
+                        else:
+                            with tf.device('/cpu'): # necessary to multi-GPU scaling
+                                model_opt = model.LSTMAttModel.create(inputtokens = max_length+1, 
+                                                                      vocabsize = vocab_size,
+                                                                      weight=best_weight,
+                                                                      lstmunits=int(best_geom[0]), 
+                                                                      denseunits = int(best_geom[1]), 
+                                                                      embedding = int(best_geom[2]))
+                                
+                        multi_model = model.ModelMGPU(model_opt, gpus=n_gpus, bridge_type=bridge_type)
+                    else: # single GPU
 
-                    model_opt = model.LSTMAttModel.create(inputtokens = max_length+1, 
-                                                          vocabsize = vocab_size,
-                                                          weight=best_weight,
-                                                          lstmunits=int(best_geom[0]), 
-                                                          denseunits = int(best_geom[1]), 
-                                                          embedding = int(best_geom[2]))
-                    
-                    multi_model = model_opt
+                        model_opt = model.LSTMAttModel.create(inputtokens = max_length+1, 
+                                                              vocabsize = vocab_size,
+                                                              weight=best_weight,
+                                                              lstmunits=int(best_geom[0]), 
+                                                              denseunits = int(best_geom[1]), 
+                                                              embedding = int(best_geom[2]))
+                        
+                        multi_model = model_opt
 
-                batch_size = int(params[:,0][0])
-                custom_adam = Adam(lr=math.pow(10,-float(params[:,1][0])))
-                multi_model.compile(loss='mse', optimizer=custom_adam, metrics=[metrics.mae,metrics.mse])
+                    batch_size = int(params[:,0][0])
+                    custom_adam = Adam(lr=math.pow(10,-float(params[:,1][0])))
+                    multi_model.compile(loss='mse', optimizer=custom_adam, metrics=[metrics.mae,metrics.mse])
 
-                history = multi_model.fit_generator(generator = DataSequence(x_train_enum_tokens,
-                                                                             vocab = tokens, 
-                                                                             max_length = max_length, 
-                                                                             props_set = y_train_enum, 
-                                                                             batch_size = batch_size), 
-                                                                             steps_per_epoch = math.ceil(len(x_train_enum_tokens)/batch_size)//bayopt_it_factor, 
-                                                    validation_data = DataSequence(x_valid_enum_tokens,
-                                                                                   vocab = tokens, 
-                                                                                   max_length = max_length, 
-                                                                                   props_set = y_valid_enum, 
-                                                                                   batch_size = min(len(x_valid_enum_tokens), batch_size)),
-                                                    validation_steps = math.ceil(len(x_valid_enum_tokens)/min(len(x_valid_enum_tokens), batch_size))//bayopt_it_factor, 
-                                                    epochs = bayopt_n_epochs, 
-                                                    shuffle = True,
-                                                    initial_epoch = 0, 
-                                                    verbose = 0)
+                    history = multi_model.fit_generator(generator = DataSequence(x_train_enum_tokens,
+                                                                                 vocab = tokens, 
+                                                                                 max_length = max_length, 
+                                                                                 props_set = y_train_enum, 
+                                                                                 batch_size = batch_size), 
+                                                                                 steps_per_epoch = math.ceil(len(x_train_enum_tokens)/batch_size)//bayopt_it_factor, 
+                                                        validation_data = DataSequence(x_valid_enum_tokens,
+                                                                                       vocab = tokens, 
+                                                                                       max_length = max_length, 
+                                                                                       props_set = y_valid_enum, 
+                                                                                       batch_size = min(len(x_valid_enum_tokens), batch_size)),
+                                                        validation_steps = math.ceil(len(x_valid_enum_tokens)/min(len(x_valid_enum_tokens), batch_size))//bayopt_it_factor, 
+                                                        epochs = bayopt_n_epochs, 
+                                                        shuffle = True,
+                                                        initial_epoch = 0, 
+                                                        verbose = 0)
 
-                best_epoch = np.argmin(history.history['val_loss'])
-                mae_valid = history.history['val_mean_absolute_error'][best_epoch]
-                mse_valid = history.history['val_mean_squared_error'][best_epoch]
-                if math.isnan(mse_valid): # discard diverging architectures (rare event)
-                    mae_valid = math.inf
-                    mse_valid = math.inf
-                print('Valid MAE: {0:0.4f}, RMSE: {1:0.4f}'.format(mae_valid, mse_valid))
+                    best_epoch = np.argmin(history.history['val_loss'])
+                    # mae_valid = history.history['val_mean_absolute_error'][best_epoch]
+                    mse_valid = history.history['val_mean_squared_error'][best_epoch]
+                    if math.isnan(mse_valid): # discard diverging architectures (rare event)
+                        # mae_valid = math.inf
+                        mse_valid = math.inf
+                    mseValidRuns.append(mse_valid)
+                meanMseValid = np.mean(mseValidRuns)
+                print('RMSE: {0:0.4f}'.format(mse_valid))
 
                 return mse_valid
 
