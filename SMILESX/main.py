@@ -138,7 +138,8 @@ def Main(data,
          alpha_ref = 2.8,
          best_weight = -0.5,
          patience = 50,
-         n_epochs = 100):
+         n_epochs = 100,
+         ignore_first_epochs = 1):
     
     if augmentation:
         p_dir_temp = 'Augm'
@@ -163,7 +164,7 @@ def Main(data,
         utils.random_split(smiles_input=data.smiles, 
                            prop_input=np.array(data.iloc[:,1]), 
                            random_state=seed_list[ifold]
-,                           scaling = True)
+,                          scaling = True)
         # data augmentation or not
         if augmentation == True:
             print("***Data augmentation to {}***\n".format(augmentation))
@@ -314,7 +315,7 @@ def Main(data,
             scores = np.array(scores)
             ## Multistage sorting procedure
             ## Firstly, sort based on mean score and best score over weights
-            points = scores[:, [3, 4, 7]].tolist()
+            points = scores[:, [3, 4]].tolist()
             sort_ind = pg.sort_population_mo(points)
             print("Unordered scores")
             print(pd.DataFrame(scores))
@@ -468,19 +469,80 @@ def Main(data,
         # Checkpoint, Early stopping and callbacks definition
         filepath=save_dir+'LSTMAtt_'+data_name+'_model.best_fold_'+str(ifold)+'.hdf5'
         
-        checkpoint = ModelCheckpoint(filepath, 
-                                     monitor='val_loss', 
-                                     verbose=0, 
-                                     save_best_only=True, 
-                                     mode='min')
+        # checkpoint = ModelCheckpoint(filepath, 
+        #                              monitor='val_loss', 
+        #                              verbose=0, 
+        #                              save_best_only=True,
+        #                              mode='min')
 
-        earlystopping = EarlyStopping(monitor='val_loss', 
-                                      min_delta=0, 
-                                      patience=patience, 
-                                      verbose=0, 
-                                      mode='min')
+        # earlystopping = EarlyStopping(monitor='val_loss', 
+        #                               min_delta=0, 
+        #                               patience=patience, 
+        #                               verbose=0, 
+        #                               mode='min')
                 
-        callbacks_list = [checkpoint, earlystopping]
+        # callbacks_list = [checkpoint, earlystopping]
+
+        class EarlyStoppingIgnoreBeginning(tf.keras.callbacks.Callback):
+            """Stop training when the loss is at its min after some fixed number
+            of epochs has been done (default is 100).
+    
+            Arguments:
+            patience: Number of epochs to wait after min has been hit. After this
+            number of no improvement, training stops.
+            """
+
+            def __init__(self, filepath, patience=0, ignore_first_epochs=0):
+                super(EarlyStoppingIgnoreBeginning, self).__init__()
+                
+                self.filepath = filepath
+                self.patience = patience
+                self.ignore_first_epochs = ignore_first_epochs
+
+                # best_weights to store the weights at which the minimum loss occurs.
+                self.best_weights = None
+
+            def on_train_begin(self, logs=None):
+                # The number of epoch it has waited when loss is no longer minimum.
+                self.wait = 0
+                # The epoch the training stops at.
+                self.best_epoch = 0
+                # Initialize the best as infinity.
+                self.best = np.Inf
+
+            def on_epoch_end(self, epoch, logs=None):
+                current = logs.get('val_loss')
+                if epoch>self.ignore_first_epochs:
+                    if np.less(current, self.best):
+                        print("Current epochs is better the previous best loss")
+                        print("Validation loss is:")
+                        print(current)
+                        self.best = current
+                        self.wait = 0
+                        # Record the best weights if the current result is better (less).
+                        self.best_weights = self.model.get_weights()
+                        self.best_epoch = epoch
+#                     else:
+#                         self.wait += 1
+                        #self.best_weights = self.model.get_weights()
+#                 if self.wait >= self.patience:
+#                     self.stopped_epoch = epoch
+#                     self.model.stop_training = True
+                    
+            def on_train_end(self, logs=None):
+#                 if self.stopped_epoch > 0:
+#                     print('Epoch %05d: early stopping' % (self.stopped_epoch + 1))
+                print("The model will be based on the epoch #{}".format(self.best_epoch))
+                print('Restoring model weights from the end of the best epoch.')
+                self.model.set_weights(self.best_weights)
+                # Save the final model
+                self.model.save(self.filepath)
+        
+        mycallback = EarlyStoppingIgnoreBeginning(filepath=filepath,
+                                                  patience=patience,
+                                                  ignore_first_epochs=ignore_first_epochs)
+                
+        callbacks_list = [mycallback]
 
         # Fit the model
         history = multi_model.fit_generator(generator = DataSequence(x_train_enum_tokens,
