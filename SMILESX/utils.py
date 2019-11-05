@@ -16,23 +16,23 @@ np.set_printoptions(precision=3)
 #         3 arrays of smiles for training, validation, test: x_train, x_valid, x_test, 
 #         3 arrays of properties for training, validation, test: y_train, y_valid, y_test, 
 #         the scaling function: scaler
-def random_split(smiles_input, prop_input, random_state, scaling = True):
-    np.random.seed(seed=random_state)
-    full_idx = np.array([x for x in range(smiles_input.shape[0])])
-    train_idx = np.random.choice(full_idx, 
-                                 size=math.ceil(0.8*smiles_input.shape[0]),
-                                 replace = False)
+def random_split(smiles_input, prop_input, err_input, train_val_idx, test_idx, scaling = True):
+    
+    y_err = {}
+    train_nsamples = math.ceil(train_val_idx.shape[0]*8/9)
+    train_idx = train_val_idx[:train_nsamples]
     x_train = smiles_input[train_idx]
     y_train = prop_input[train_idx].reshape(-1, 1)
+    y_err['train'] = err_input[train_idx].reshape(-1, 1)
     
-    valid_test_idx = full_idx[np.isin(full_idx, train_idx, invert=True)]
-    valid_test_len = math.ceil(0.5*valid_test_idx.shape[0])
-    valid_idx = valid_test_idx[:valid_test_len]
-    test_idx = valid_test_idx[valid_test_len:]
+    valid_idx = train_val_idx[train_nsamples:]
     x_valid = smiles_input[valid_idx]
     y_valid = prop_input[valid_idx].reshape(-1, 1)
+    y_err['valid'] = err_input[valid_idx].reshape(-1, 1)
+    
     x_test = smiles_input[test_idx]
     y_test = prop_input[test_idx].reshape(-1, 1)
+    y_err['test'] = err_input[test_idx].reshape(-1, 1)
     
     if scaling == True:
         scaler = RobustScaler(with_centering=True, 
@@ -50,7 +50,7 @@ def random_split(smiles_input, prop_input, random_state, scaling = True):
                                       x_valid.shape[0]/smiles_input.shape[0],\
                                       x_test.shape[0]/smiles_input.shape[0]))
     
-    return x_train, x_valid, x_test, y_train, y_valid, y_test, scaler
+    return x_train, x_valid, x_test, y_train, y_valid, y_test, y_err, scaler
 ##
 
 ## Compute mean and median of predictions

@@ -1,3 +1,4 @@
+import numpy as np
 from keras.models import Model
 
 from keras.layers import Input, Dense
@@ -11,6 +12,8 @@ from keras.utils import multi_gpu_model
 
 from keras import backend as K
 from keras import initializers
+
+from keras.callbacks import Callback
 
 # #from keras.backend.tensorflow_backend import set_session
 # config = tf.ConfigProto()
@@ -257,4 +260,47 @@ class ModelMGPU(Model):
             return getattr(self._smodel, attrname)
 
         return super(ModelMGPU, self).__getattribute__(attrname)
+##
+class IgnoreBeginningSaveBest(Callback):
+            """Save the best weights only after some number of epochs has been trained
+    
+            Arguments:
+            filepath -- where to save the resulting model
+            ignore_first_epochs -- how many first epochs to ignore before registering the best validation loss
+            
+            """
+
+            def __init__(self, filepath, best, ignore_first_epochs=0):
+                super(IgnoreBeginningSaveBest, self).__init__()
+
+                self.filepath = filepath
+                self.ignore_first_epochs = ignore_first_epochs
+                self.best = best
+
+                # best_weights to store the weights at which the minimum loss occurs.
+                self.best_weights = None
+
+            def on_train_begin(self, logs=None):
+                # The epoch the training stops at.
+                self.best_epoch = 0
+
+            def on_epoch_end(self, epoch, logs=None):
+                current = logs.get('val_loss')
+                if epoch>self.ignore_first_epochs:
+                    if np.less(current, self.best):
+                        print("Current epochs is better the previous best loss")
+                        print("Validation loss is:")
+                        print(current)
+                        self.best = current
+                        # Record the best weights if the current result is better (less).
+                        self.best_weights = self.model.get_weights()
+                        self.best_epoch = epoch
+                    
+            def on_train_end(self, logs=None):
+                print("The model will be based on the epoch #{}".format(self.best_epoch))
+                print('Restoring model weights from the end of the best epoch.')
+                if self.best_weights is not None:
+                    self.model.set_weights(self.best_weights)
+                # Save the final model
+                self.model.save(self.filepath)
 ##
