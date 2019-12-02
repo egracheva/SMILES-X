@@ -222,7 +222,7 @@ def add_extra_tokens(tokens, vocab_size):
 
 ## Encode SMILES as a vector of integers
 # tokenized_smiles_list: list of tokenized SMILES
-# max_length: force the vectors to have a same length
+# max_length: force the vectors to have the same length
 # vocab: vocabulary of tokens
 # returns: 
 #         array of integers of dimensions (number_of_SMILES, max_length)
