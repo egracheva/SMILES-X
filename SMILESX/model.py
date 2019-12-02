@@ -277,8 +277,8 @@ class IgnoreBeginningSaveBest(Callback):
                 self.ignore_first_epochs = ignore_first_epochs
                 self.best = best
 
-                # best_weights to store the weights at which the minimum loss occurs.
-                self.best_weights = None
+                # best_seeds to store the weights at which the minimum loss occurs.
+                self.best_seeds = None
 
             def on_train_begin(self, logs=None):
                 # The epoch the training stops at.
@@ -293,14 +293,14 @@ class IgnoreBeginningSaveBest(Callback):
                         print(current)
                         self.best = current
                         # Record the best weights if the current result is better (less).
-                        self.best_weights = self.model.get_weights()
+                        self.best_seeds = self.model.get_weights()
                         self.best_epoch = epoch
                     
             def on_train_end(self, logs=None):
                 print("The model will be based on the epoch #{}".format(self.best_epoch))
                 print('Restoring model weights from the end of the best epoch.')
-                if self.best_weights is not None:
-                    self.model.set_weights(self.best_weights)
+                if self.best_seeds is not None:
+                    self.model.set_weights(self.best_seeds)
                 # Save the final model
                 self.model.save(self.filepath)
 ##
