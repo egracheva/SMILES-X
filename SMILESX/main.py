@@ -2,10 +2,10 @@ import numpy as np
 import pandas as pd
 import os
 import math
-# For fixing the GPU in use
-os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID";
-# The GPU id to use (e.g. "0", "1", etc.)
-os.environ["CUDA_VISIBLE_DEVICES"]="0";
+# # For fixing the GPU in use
+# os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID";
+# # The GPU id to use (e.g. "0", "1", etc.)
+# os.environ["CUDA_VISIBLE_DEVICES"]="2";
 
 import matplotlib.pyplot as plt
 
@@ -278,22 +278,21 @@ def Main(data,
                 for n_lstm in geom_bounds[0]:
                     for n_dense in geom_bounds[1]:
                         for n_embed in geom_bounds[2]:
-                          scores.append([n_lstm, n_dense, n_embed] + create_mod_geom([n_lstm, n_dense, n_embed], seed_range))
+                            scores.append([n_lstm, n_dense, n_embed] + create_mod_geom([n_lstm, n_dense, n_embed], seed_range))
                 scores = np.array(scores)
                 ## Multistage sorting procedure
                 ## Firstly, sort based on mean score and best score over weights
-                points = scores[:, [3, 4]].tolist()
-                sort_ind = pg.sort_population_mo(points)
-                print("Unordered scores")
-                print(pd.DataFrame(scores))
+                #points = scores[:, [5]].tolist()
+                #sort_ind = pg.sort_population_mo(points)
+                sorted_scores = sorted(scores, key = lambda x: x[5])
                 print("Re-ordered scores")
-                print(pd.DataFrame(scores[sort_ind]))
+                print(pd.DataFrame(sorted_scores[:10]))
     
                 # Select the best geometry for further learning rate and batch size optimisation
-                best_geom = scores[sort_ind[0], :3]
-                best_seed = scores[sort_ind[0], 6]
+                best_geom = sorted_scores[0][:3]
+                best_seed = sorted_scores[0][6]
                 print("The best untrained RMSE is:")
-                print(scores[sort_ind[0], 5])
+                print(sorted_scores[0][5])
                 print("Which is achieved using the weight of {}".format(best_seed))
                 print("\nThe best selected geometry is:\n\tLSTM units: {}\n\tDense units: {}\n\tEmbedding {}".\
                       format(best_geom[0], best_geom[1], best_geom[2]))
@@ -308,8 +307,18 @@ def Main(data,
             prediction_train_bag = np.zeros((x_train.shape[0], n_runs))
             prediction_valid_bag = np.zeros((x_valid.shape[0], n_runs))
             prediction_test_bag = np.zeros((x_test.shape[0], n_runs))
+            
+            # True unscaled data for the plots
+            y_true = {}
+            y_true['train'] = scaler.inverse_transform(y_train).ravel()
+            y_true['valid'] = scaler.inverse_transform(y_valid).ravel()
+            y_true['test'] = scaler.inverse_transform(y_test).ravel()
+            
             for run in range(n_runs):
                 print("*** Run #{} ***".format(run+1))
+                # Make the directory for the current run
+                save_dir_run = save_dir+'fold_'+str(ifold)+'/run_'+str(run+1)+'/'
+                os.makedirs(save_dir_run, exist_ok=True)
                 # Train the model and predict
                 K.clear_session()  
                 # Define the multi-gpus model if necessary
@@ -359,10 +368,10 @@ def Main(data,
                 n_epochs_schedule = [int(n_epochs/3), int(n_epochs/3), n_epochs - 2*int(n_epochs/3)]
                 custom_adam = Adam(lr=learning_rate)
                 # Compile the model
-                multi_model.compile(loss="mse", optimizer=custom_adam, metrics=[metrics.mae,metrics.mse])
+                multi_model.compile(loss='mse', optimizer=custom_adam, metrics=[metrics.mae,metrics.mse])
                 
                 # Checkpoint, Early stopping and callbacks definition
-                filepath=save_dir+'LSTMAtt_'+data_name+'_model.best_fold_'+str(ifold)+'.hdf5'
+                filepath=save_dir_run+data_name+'_model.best_fold_'+str(ifold)+'_run_'+str(run)+'.hdf5'
         
                 # Fit the model applying the batch size schedule:
                 n_epochs_done = 0
@@ -403,12 +412,12 @@ def Main(data,
                 plt.ylabel('Loss')
                 plt.xlabel('Epoch')
                 plt.legend(['Train', 'Validation'], loc='upper right')
-                plt.savefig(save_dir+'History_fit_LSTMAtt_'+data_name+'_model_fold_'+str(ifold)+'_run_'+str(run+1)+'.png', bbox_inches='tight')
+                plt.savefig(save_dir_run+'History_fit_'+data_name+'_model_fold_'+str(ifold)+'_run_'+str(run+1)+'.png', bbox_inches='tight')
                 plt.close()
     
                 print("***Predictions from the best model.***\n")
-                model_train.load_weights(save_dir+'LSTMAtt_'+data_name+'_model.best_fold_'+str(ifold)+'.hdf5')
-                model_train.compile(loss="mse", optimizer='adam', metrics=[metrics.mae,metrics.mse])
+                model_train.load_weights(filepath)
+                #model_train.compile(loss="mse", optimizer='adam', metrics=[metrics.mae,metrics.mse])
         
                 # predict and compare for the training, validation and test sets
                 x_train_enum_tokens_tointvec = token.int_vec_encode(tokenized_smiles_list = x_train_enum_tokens, 
@@ -430,20 +439,82 @@ def Main(data,
                 y_pred_valid_mean, _ = utils.mean_median_result(x_valid_enum_card, y_pred_valid)
                 y_pred_test_mean, _ = utils.mean_median_result(x_test_enum_card, y_pred_test)
                 
-                prediction_train_bag[:,run] = scaler.inverse_transform(y_pred_train_mean.reshape(-1,1)).ravel()
-                prediction_valid_bag[:,run] = scaler.inverse_transform(y_pred_valid_mean.reshape(-1,1)).ravel()
-                prediction_test_bag[:,run] = scaler.inverse_transform(y_pred_test_mean.reshape(-1,1)).ravel()
-
+                y_preds = {}
+                y_preds['train'] = scaler.inverse_transform(y_pred_train_mean.reshape(-1,1)).ravel()
+                y_preds['valid'] = scaler.inverse_transform(y_pred_valid_mean.reshape(-1,1)).ravel()
+                y_preds['test'] = scaler.inverse_transform(y_pred_test_mean.reshape(-1,1)).ravel()
+                
+                prediction_train_bag[:,run] = y_preds['train']
+                prediction_valid_bag[:,run] = y_preds['valid']
+                prediction_test_bag[:,run] = y_preds['test']
+                
                 final_prediction[test_idx, run] = scaler.inverse_transform(y_pred_test_mean.reshape(-1,1)).ravel()
-            
-            # Performing inverse transformation (unscaling)
-            y_true = {}
-            y_true['train'] = scaler.inverse_transform(y_train).ravel()
-            y_true['valid'] = scaler.inverse_transform(y_valid).ravel()
-            y_true['test'] = scaler.inverse_transform(y_test).ravel()
 
-            #y_train_pred = scaler.inverse_transform(y_pred_train_mean.reshape(-1,1))
-            #y_valid_pred = scaler.inverse_transform(y_pred_valid_mean.reshape(-1,1))
+                
+                # Plot individual plots per run for the internal tests
+                # Setting plot limits
+                y_true_min = min(np.min(y_true['train']), np.min(y_true['valid']), np.min(y_true['test']))
+                y_true_max = max(np.max(y_true['train']), np.max(y_true['valid']), np.max(y_true['test']))
+                y_pred_min = min(np.min(y_preds['train']), np.min(y_preds['valid']), np.min(y_preds['test']))
+                y_pred_max = max(np.max(y_preds['train']), np.max(y_preds['valid']), np.max(y_preds['test']))
+                # Expanding slightly the canvas around the data points (by 10%)
+                axmin = y_true_min-0.1*(y_true_max-y_true_min)
+                axmax = y_true_max+0.1*(y_true_max-y_true_min)
+                aymin = y_pred_min-0.1*(y_pred_max-y_pred_min)
+                aymax = y_pred_max+0.1*(y_pred_max-y_pred_min)
+
+                plt.xlim(min(axmin, aymin), max(axmax, aymax))
+                plt.ylim(min(axmin, aymin), max(axmax, aymax))
+
+                plt.errorbar(y_true['train'], 
+                            y_preds['train'],
+                            xerr = y_err['train'],
+                            fmt='o',
+                            label="Train",
+                            ecolor='#519fc4',
+                            elinewidth = 0.5, 
+                            ms=5,
+                            mfc='#519fc4',
+                            markeredgewidth = 0,
+                            alpha=0.7)
+                plt.errorbar(y_true['valid'], 
+                            y_preds['valid'],
+                            xerr = y_err['valid'],
+                            ecolor='#db702e',
+                            elinewidth = 0.5,
+                            fmt='o',
+                            label="Validation", 
+                            ms=5, 
+                            mfc='#db702e',
+                            markeredgewidth = 0,
+                            alpha=0.7)
+                plt.errorbar(y_true['test'], 
+                            y_preds['test'],
+                            xerr = y_err['test'],
+                            ecolor='#cc1b00',
+                            elinewidth = 0.5,
+                            fmt='o',
+                            label="Test", 
+                            ms=5, 
+                            mfc='#cc1b00',
+                            markeredgewidth = 0,
+                            alpha=0.7)
+
+
+                # Plot X=Y line
+                plt.plot([max(plt.xlim()[0], plt.ylim()[0]), 
+                          min(plt.xlim()[1], plt.ylim()[1])],
+                         [max(plt.xlim()[0], plt.ylim()[0]), 
+                          min(plt.xlim()[1], plt.ylim()[1])],
+                         ':', color = '#595f69')
+
+                plt.xlabel('Observations ' + data_units, fontsize = 12)
+                plt.ylabel('Predictions ' + data_units, fontsize = 12)
+                plt.legend()
+
+                plt.savefig(save_dir_run+'TrainValid_Plot_'+data_name+'_model_fold_'+str(ifold)+'_run_'+str(run)+'.png', bbox_inches='tight', dpi=80)
+                plt.close()
+
             y_preds_mean = {}
             y_preds_mean['train'] = np.mean(prediction_train_bag, axis = 1)
             y_preds_mean['valid'] = np.mean(prediction_valid_bag, axis = 1)
@@ -457,7 +528,6 @@ def Main(data,
             for name in ['train', 'valid', 'test']:
                 print(name.capitalize() + ' set:')
                 N = float(y_true[name].shape[0])
-                print(y_true[name].shape)
                 sstot = np.sum(np.square(y_true[name] - np.mean(y_true[name])), axis=0)
                 ssres = np.sum(np.square(y_true[name] - y_preds_mean[name]), axis=0)
                 
@@ -481,8 +551,6 @@ def Main(data,
                 d_rmse = np.sqrt(np.square(y_true[name]-y_preds_mean[name]).dot(np.square(y_preds_sigma[name]))/N/ssres)
                 # Error on RMSE when taking into account both errors on predictions and true data
                 d_rmse_exp = np.sqrt(np.square(y_true[name]-y_preds_mean[name]).dot(np.square(y_preds_sigma[name]) + np.square(y_err[name]))/N/ssres)
-                print(np.square(y_true[name]-y_preds_mean[name]).shape)
-                print((np.square(y_preds_sigma[name]) + np.square(y_err[name])).shape)
                 # MAE
                 mae = mean_absolute_error(y_true[name], y_preds_mean[name])
                 # Setup the precision of the displayed error to print it cleanly
@@ -564,7 +632,7 @@ def Main(data,
             plt.ylabel('Predictions ' + data_units, fontsize = 12)
             plt.legend()
     
-            plt.savefig(save_dir+'TrainValid_Plot_LSTMAtt_'+data_name+'_model_fold_'+str(ifold)+'.png', bbox_inches='tight', dpi=80)
+            plt.savefig(save_dir+'TrainValid_Plot_'+data_name+'_fold_'+str(ifold)+'.png', bbox_inches='tight', dpi=80)
             plt.close()
             print("Finished the " + str(ifold) + " fold")
             print("----------------------------------------------------")
@@ -573,7 +641,7 @@ def Main(data,
             print("Skipped the " + str(ifold) + " fold")
             print("----------------------------------------------------")  
             ifold += 1
-    if final_prediction:
+    if not folds_of_interest:
         final_prediction_mean = np.mean(final_prediction, axis = 1)
         final_prediction_sigma = np.std(final_prediction, axis = 1)
         data_values = np.array(data.iloc[:,1])
@@ -598,7 +666,7 @@ def Main(data,
                           )
 
         rmse_final = np.sqrt(mean_squared_error(data_values, final_prediction_mean))
-        d_rmse_final = np.sqrt(np.square(data_values-final_prediction_mean).dot(np.square(final_prediction_sigma))*sstot_final/N_final)
+        d_rmse_final = np.sqrt(np.square(data_values-final_prediction_mean).dot(np.square(final_prediction_sigma))/N_final/ssres_final)
         d_rmse_final_exp = np.sqrt(np.square(data_values-final_prediction_mean).dot(np.square(final_prediction_sigma) + np.square(data_error))/N_final/ssres_final)
 
         mae_final = mean_absolute_error(data_values, final_prediction_mean)
@@ -606,9 +674,9 @@ def Main(data,
         d_mae_final_exp = np.sqrt(np.sum(np.square(final_prediction_sigma) + np.square(data_error)))/N_final
 
         print("Final averaged R^2:")
-        print("{0:0.4f}+-{1:0.4f}({2:0.4f})".format(r2_final, d_r2_final, d_r2_final_exp[0]))
+        print("{0:0.4f}+-{1:0.4f}({2:0.4f})".format(r2_final, d_r2_final, d_r2_final_exp))
         print("Final averaged RMSE:")
-        print("{0:{3}f}+-{1:{3}f}({2:{3}f})".format(rmse_final, d_rmse_final, d_rmse_final_exp[0], precision_rmse))
+        print("{0:{3}f}+-{1:{3}f}({2:{3}f})".format(rmse_final, d_rmse_final, d_rmse_final_exp, precision_rmse))
         print("Final averaged MAE:")
         print("{0:{3}f}+-{1:{3}f}({2:{3}f})\n".format(mae_final, d_mae_final, d_mae_final_exp, precision_mae))
         
@@ -654,7 +722,7 @@ def Main(data,
         plt.xlabel('Observations ' + data_units, fontsize = 12)
         plt.ylabel('Predictions ' + data_units, fontsize = 12)
         
-        plt.savefig(save_dir+'TrainValid_Plot_LSTMAtt_'+data_name+'_model_FinalPrediction.png', bbox_inches='tight', dpi=80)
+        plt.savefig(save_dir+'TrainValid_Plot_'+data_name+'_FinalPrediction.png', bbox_inches='tight', dpi=80)
         plt.close()
         
         
@@ -704,4 +772,3 @@ class DataSequence(Sequence):
 
         return np.array(batch_x), np.array(batch_y)
 ##
-
