@@ -282,7 +282,7 @@ def Main(data,
                 scores = np.array(scores)
                 ## Multistage sorting procedure
                 ## Firstly, sort based on mean score and best score over weights
-                #points = scores[:, [5]].tolist()
+                #points = scores[:, [4, 5]].tolist()
                 #sort_ind = pg.sort_population_mo(points)
                 sorted_scores = sorted(scores, key = lambda x: x[5])
                 print("Re-ordered scores")
@@ -383,7 +383,7 @@ def Main(data,
                     ignorebeginning = model.IgnoreBeginningSaveBest(filepath=filepath,
                                                                     best=best_val,
                                                                     ignore_first_epochs=ignore_first_epochs)
-                    callbacks_list = [ignorebeginning]  
+                    callbacks_list = [ignorebeginning] 
                     print("Schedule step number {0}\nNumber of epochs: {1}, batch size: {2}".format(i+1, n_epochs_part, batch_size))
                     history = multi_model.fit_generator(generator = DataSequence(x_train_enum_tokens,
                                                                                  vocab = tokens, 
@@ -658,27 +658,19 @@ def Main(data,
 
         r2_final = r2_score(data_values, final_prediction_mean)
         d_r2_final = 2/sstot_final*np.sqrt(np.square(data_values-final_prediction_mean).dot(np.square(final_prediction_sigma)))
-        d_r2_final_exp = (2 / np.square(ssres_final) *
-                          np.sqrt(np.square(sstot_final) * np.square(data_values-final_prediction_mean)
-                          .dot(np.square(final_prediction_sigma)) +
-                          ((data_values - np.mean(data_values)) * ssres_final - (data_values-final_prediction_mean) * sstot_final)
-                          .dot(np.square(data_error)))
-                          )
 
         rmse_final = np.sqrt(mean_squared_error(data_values, final_prediction_mean))
         d_rmse_final = np.sqrt(np.square(data_values-final_prediction_mean).dot(np.square(final_prediction_sigma))/N_final/ssres_final)
-        d_rmse_final_exp = np.sqrt(np.square(data_values-final_prediction_mean).dot(np.square(final_prediction_sigma) + np.square(data_error))/N_final/ssres_final)
 
         mae_final = mean_absolute_error(data_values, final_prediction_mean)
         d_mae_final = np.sqrt(np.sum(np.square(final_prediction_sigma)))/N_final
-        d_mae_final_exp = np.sqrt(np.sum(np.square(final_prediction_sigma) + np.square(data_error)))/N_final
 
         print("Final averaged R^2:")
-        print("{0:0.4f}+-{1:0.4f}({2:0.4f})".format(r2_final, d_r2_final, d_r2_final_exp))
+        print("{0:0.4f}+-{1:0.4f}".format(r2_final, d_r2_final, d_r2_final_exp))
         print("Final averaged RMSE:")
-        print("{0:{3}f}+-{1:{3}f}({2:{3}f})".format(rmse_final, d_rmse_final, d_rmse_final_exp, precision_rmse))
+        print("{0:{2}f}+-{1:{2}f}".format(rmse_final, d_rmse_final, precision_rmse))
         print("Final averaged MAE:")
-        print("{0:{3}f}+-{1:{3}f}({2:{3}f})\n".format(mae_final, d_mae_final, d_mae_final_exp, precision_mae))
+        print("{0:{2}f}+-{1:{2}f}\n".format(mae_final, d_mae_final, precision_mae))
         
         # Changed colors, scaling and sizes
         plt.figure(figsize=(12, 8))
