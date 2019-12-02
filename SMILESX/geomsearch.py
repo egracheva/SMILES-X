@@ -2,7 +2,7 @@ def findBestArch(data,
                  data_name, 
                  bayopt_bounds,
                  geom_bounds,
-                 weight_range,
+                 seed_range,
                  n_opt_runs = 5,
                  k_fold_number = 5, 
                  augmentation = True, 
@@ -100,7 +100,7 @@ def findBestArch(data,
 
         # Operate the first step of the optimization:
         # geometry optimization (number of units in LSTM and Dense layers)
-        def create_mod_geom(params, weight_range):
+        def create_mod_geom(params, seed_range):
             # Prepare the data for the evaluation
             x_train_enum_tokens_tointvec = token.int_vec_encode(tokenized_smiles_list = x_train_enum_tokens, 
                                            max_length = max_length+1, 
@@ -112,7 +112,7 @@ def findBestArch(data,
             x_geom_enum_tokens_tointvec = np.concatenate((x_train_enum_tokens_tointvec, x_valid_enum_tokens_tointvec), axis = 0)
             y_geom_enum                 = np.concatenate((y_train_enum, y_valid_enum), axis = 0)
             pred_scores = []
-            for i, weight in enumerate(weight_range):
+            for i, weight in enumerate(seed_range):
                 #Changing weight into seed for the test
                 # weight = weight*2+5
                 # print(weight)
@@ -156,9 +156,9 @@ def findBestArch(data,
             mean_score = np.mean(pred_scores)
             best_score = np.min(pred_scores)
             sigma_score = np.std(pred_scores)
-            best_weight = weight_range[np.argmin(pred_scores)]
+            best_seed = seed_range[np.argmin(pred_scores)]
             n_nodes = model_geom.count_params()
-            return [mean_score, sigma_score, best_score, best_weight, n_nodes]
+            return [mean_score, sigma_score, best_score, best_seed, n_nodes]
 
         print("***Geometry search.***")
         # start = time.time()
@@ -170,7 +170,7 @@ def findBestArch(data,
         for n_lstm in geom_bounds[0]:
             for n_dense in geom_bounds[1]:
                 for n_embed in geom_bounds[2]:
-                  scores.append([n_lstm, n_dense, n_embed] + create_mod_geom([n_lstm, n_dense, n_embed], weight_range))
+                  scores.append([n_lstm, n_dense, n_embed] + create_mod_geom([n_lstm, n_dense, n_embed], seed_range))
         scores = np.array(scores)
         ## Multistage sorting procedure
         ## Firstly, sort based on mean score and best score over weights
@@ -183,10 +183,10 @@ def findBestArch(data,
 
         # Select the best geometry for further learning rate and batch size optimisation
         selected_geom = scores[sort_ind[0], :3]
-        best_weight = scores[sort_ind[0], 6]
+        best_seed = scores[sort_ind[0], 6]
         print("The best untrained RMSE is:")
         print(scores[sort_ind[0], 5])
-        print("Which is achieved using the weight of {}".format(best_weight))
+        print("Which is achieved using the weight of {}".format(best_seed))
         print("\nThe selected geometry for current fold is:\n\tLSTM units: {}\n\tDense units: {}\n\tEmbedding {}".\
               format(selected_geom[0], selected_geom[1], selected_geom[2]))
         selected_geoms.append(selected_geom)
@@ -211,7 +211,7 @@ def findBestArch(data,
                 if bridge_type == 'NVLink':
                     model_opt = model.LSTMAttModel.create(inputtokens = max_length+1, 
                                                           vocabsize = vocab_size, 
-                                                          weight=best_weight,
+                                                          weight=best_seed,
                                                           lstmunits=int(best_geom[0]), 
                                                           denseunits = int(best_geom[1]), 
                                                           embedding = int(best_geom[2]))
@@ -219,7 +219,7 @@ def findBestArch(data,
                     with tf.device('/cpu'): # necessary to multi-GPU scaling
                         model_opt = model.LSTMAttModel.create(inputtokens = max_length+1, 
                                                               vocabsize = vocab_size,
-                                                              weight=best_weight,
+                                                              weight=best_seed,
                                                               lstmunits=int(best_geom[0]), 
                                                               denseunits = int(best_geom[1]), 
                                                               embedding = int(best_geom[2]))
@@ -229,7 +229,7 @@ def findBestArch(data,
 
                 model_opt = model.LSTMAttModel.create(inputtokens = max_length+1, 
                                                       vocabsize = vocab_size,
-                                                      weight=best_weight,
+                                                      weight=best_seed,
                                                       lstmunits=int(best_geom[0]), 
                                                       denseunits = int(best_geom[1]), 
                                                       embedding = int(best_geom[2]))
