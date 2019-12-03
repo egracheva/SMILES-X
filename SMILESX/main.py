@@ -220,17 +220,14 @@ def Main(data,
                     x_geom_enum_tokens_tointvec = np.concatenate((x_train_enum_tokens_tointvec, x_valid_enum_tokens_tointvec), axis = 0)
                     y_geom_enum                 = np.concatenate((y_train_enum, y_valid_enum), axis = 0)
                     pred_scores = []
-                    for i, weight in enumerate(seed_range):
-                        #Changing weight into seed for the test
-                        # weight = weight*2+5
-                        # print(weight)
+                    for i, seed in enumerate(seed_range):
                         K.clear_session()
     
                         if n_gpus > 1:
                             if bridge_type == 'NVLink':
                                 model_geom = model.LSTMAttModelNoTrain.create(inputtokens=max_length+1, 
                                                                               vocabsize=vocab_size,
-                                                                              weight=weight,
+                                                                              seed=seed,
                                                                               lstmunits=int(params[0]), 
                                                                               denseunits=int(params[1]), 
                                                                               embedding=int(params[2])
@@ -239,7 +236,7 @@ def Main(data,
                                 with tf.device('/cpu'): # necessary to multi-GPU scaling
                                     model_geom = model.LSTMAttModelNoTrain.create(inputtokens = max_length+1, 
                                                                                   vocabsize=vocab_size,
-                                                                                  weight=weight,
+                                                                                  seed=seed,
                                                                                   lstmunits=int(params[0]), 
                                                                                   denseunits=int(params[1]), 
                                                                                   embedding=int(params[2])
@@ -249,7 +246,7 @@ def Main(data,
                         else: # single GPU
                             model_geom = model.LSTMAttModelNoTrain.create(inputtokens = max_length+1, 
                                                                           vocabsize=vocab_size,
-                                                                          weight=weight, 
+                                                                          seed=seed, 
                                                                           lstmunits=int(params[0]), 
                                                                           denseunits=int(params[1]), 
                                                                           embedding=int(params[2])
@@ -269,11 +266,6 @@ def Main(data,
                     return [mean_score, sigma_score, best_score, best_seed, n_nodes]
     
                 print("***Geometry search.***")
-                # start = time.time()
-                # Test each geometry using the single shared weight (all the weights are set to constant)
-                # The score is evaluated over the mean of the sulting predictions
-                # This is the way to test each geometry for "compatibility" with the data -- without training the model
-                # Read more in David Ha's article
                 scores = []
                 for n_lstm in geom_bounds[0]:
                     for n_dense in geom_bounds[1]:
@@ -281,7 +273,7 @@ def Main(data,
                             scores.append([n_lstm, n_dense, n_embed] + create_mod_geom([n_lstm, n_dense, n_embed], seed_range))
                 scores = np.array(scores)
                 ## Multistage sorting procedure
-                ## Firstly, sort based on mean score and best score over weights
+                ## Firstly, sort based on mean score and best score over seeds
                 #points = scores[:, [4, 5]].tolist()
                 #sort_ind = pg.sort_population_mo(points)
                 sorted_scores = sorted(scores, key = lambda x: x[5])
@@ -293,7 +285,7 @@ def Main(data,
                 best_seed = sorted_scores[0][6]
                 print("The best untrained RMSE is:")
                 print(sorted_scores[0][5])
-                print("Which is achieved using the weight of {}".format(best_seed))
+                print("Which is achieved using the seed of {}".format(best_seed))
                 print("\nThe best selected geometry is:\n\tLSTM units: {}\n\tDense units: {}\n\tEmbedding {}".\
                       format(best_geom[0], best_geom[1], best_geom[2]))
                 best_arch = best_geom.tolist()
@@ -327,7 +319,7 @@ def Main(data,
         
                         model_train = model.LSTMAttModel.create(inputtokens = max_length+1, 
                                                                 vocabsize = vocab_size,
-                                                                weight=best_seed,
+                                                                seed=best_seed,
                                                                 lstmunits= int(best_arch[0]), 
                                                                 denseunits = int(best_arch[1]), 
                                                                 embedding = int(best_arch[2]))
@@ -335,7 +327,7 @@ def Main(data,
                         with tf.device('/cpu'):
                             model_train = model.LSTMAttModel.create(inputtokens = max_length+1, 
                                                                     vocabsize = vocab_size,
-                                                                    weight=best_seed,
+                                                                    seed=best_seed,
                                                                     lstmunits= int(best_arch[0]), 
                                                                     denseunits = int(best_arch[1]), 
                                                                     embedding = int(best_arch[2]))
@@ -348,7 +340,7 @@ def Main(data,
         
                     model_train = model.LSTMAttModel.create(inputtokens = max_length+1, 
                                                             vocabsize = vocab_size,
-                                                            weight=best_seed,
+                                                            seed=best_seed,
                                                             lstmunits= int(best_arch[0]), 
                                                             denseunits = int(best_arch[1]), 
                                                             embedding = int(best_arch[2]))
