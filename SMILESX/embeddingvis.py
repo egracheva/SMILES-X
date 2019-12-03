@@ -30,7 +30,7 @@ def Embedding_Vis(data,
                   k_fold_number = 8,
                   k_fold_index = 0,
                   augmentation = False, 
-                  outdir = "../data/", 
+                  outdir = "./data/", 
                   affinity_propn = True, 
                   verbose = 0):
     
