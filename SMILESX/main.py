@@ -315,9 +315,9 @@ def Main(data,
             y_true['test'] = scaler.inverse_transform(y_test).ravel()
             
             for run in range(n_runs):
-                print("*** Run #{} ***".format(run+1))
+                print("*** Run #{} ***".format(run))
                 # Make the directory for the current run
-                save_dir_run = save_dir+'fold_'+str(ifold)+'/run_'+str(run+1)+'/'
+                save_dir_run = save_dir+'fold_{}/run_{}/'.format(k_fold_index, run)
                 os.makedirs(save_dir_run, exist_ok=True)
                 # Train the model and predict
                 K.clear_session()  
@@ -412,7 +412,7 @@ def Main(data,
                 plt.ylabel('Loss')
                 plt.xlabel('Epoch')
                 plt.legend(['Train', 'Validation'], loc='upper right')
-                plt.savefig(save_dir_run+'History_fit_'+data_name+'_model_fold_'+str(ifold)+'_run_'+str(run+1)+'.png', bbox_inches='tight')
+                plt.savefig(save_dir_run+'History_fit_'+data_name+'_model_fold_'+str(ifold)+'_run_'+str(run)+'.png', bbox_inches='tight')
                 plt.close()
     
                 print("***Predictions from the best model.***\n")
