@@ -123,56 +123,6 @@ class LSTMAttModel():
 
 
         return model
-
-##
-
-## Neural architecture of the SMILES-X for the trainless geometry optimization step
-class LSTMAttModelNoTrain():
-    # Initialization
-    # inputtokens: maximum length for the encoded and tokenized SMILES
-    # vocabsize: size of the vocabulary
-    # lstmunits: number of LSTM units
-    # denseunits: number of dense units
-    # embedding: dimension of the embedded vectors
-    # return_proba: return the attention vector (True) or not (False) (Default: False)
-    # Returns: 
-    #         a model in the Keras API format
-    @staticmethod
-
-    def create(inputtokens, vocabsize, seed, lstmunits=16, denseunits=16, embedding=32, return_proba = False):
-
-        input_ = Input(shape=(inputtokens,), dtype='int32')
-
-        # Embedding layer
-        net = Embedding(input_dim=vocabsize, 
-                        output_dim=embedding, 
-                        input_length=inputtokens,
-                        # embeddings_initializer=initializers.constant(value=seed))(input_)
-                        # embeddings_initializer=initializers.random_normal(mean=seed, stddev=0.05, seed=123))(input_)
-                        embeddings_initializer=initializers.glorot_normal(seed=seed))(input_)
-
-        # Bidirectional LSTM layer
-        net = Bidirectional(CuDNNLSTM(lstmunits, 
-                            return_sequences=True, 
-                            # kernel_initializer=initializers.constant(value=seed),
-                            # recurrent_initializer=initializers.constant(value=seed)))(net)
-                            # kernel_initializer=initializers.random_normal(mean=seed, stddev=0.05, seed=123),
-                            # recurrent_initializer=initializers.random_normal(mean=seed, stddev=0.05, seed=123)))(net)
-                            kernel_initializer=initializers.glorot_normal(seed=seed),
-                            recurrent_initializer=initializers.glorot_normal(seed=seed)))(net)
-        # net = TimeDistributed(Dense(denseunits, kernel_initializer=initializers.constant(value=seed)))(net)
-        # net = TimeDistributed(Dense(denseunits, kernel_initializer=initializers.random_normal(mean=seed, stddev=0.05, seed=123)))(net)
-        net = TimeDistributed(Dense(denseunits, kernel_initializer=initializers.glorot_normal(seed=seed)))(net)
-        net = AttentionMNoTrain(seed=seed, return_probabilities=return_proba)(net)
-
-        # Output layer
-        # net = Dense(1, activation="linear", kernel_initializer=initializers.constant(value=seed))(net)
-        # net = Dense(1, activation="linear", kernel_initializer=initializers.random_normal(mean=seed, stddev=0.05, seed=123))(net)
-        net = Dense(1, activation="linear", kernel_initializer=initializers.glorot_normal(seed=seed))(net)
-        
-        model = Model(inputs=input_, outputs=net)
-
-        return model
 ##
 
 ## Function to fit a model on a multi-GPU machine
