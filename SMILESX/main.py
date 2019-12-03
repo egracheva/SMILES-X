@@ -225,32 +225,32 @@ def Main(data,
     
                         if n_gpus > 1:
                             if bridge_type == 'NVLink':
-                                model_geom = model.LSTMAttModelNoTrain.create(inputtokens=max_length+1, 
-                                                                              vocabsize=vocab_size,
-                                                                              seed=seed,
-                                                                              lstmunits=int(params[0]), 
-                                                                              denseunits=int(params[1]), 
-                                                                              embedding=int(params[2])
-                                                                              )
-                            else:
+                                model_geom = model.LSTMAttModel.create(inputtokens=max_length+1, 
+                                                                       vocabsize=vocab_size,
+                                                                       seed=seed,
+                                                                       lstmunits=int(params[0]), 
+                                                                       denseunits=int(params[1]), 
+                                                                       embedding=int(params[2])
+                                                                       )
+                            else: 
                                 with tf.device('/cpu'): # necessary to multi-GPU scaling
-                                    model_geom = model.LSTMAttModelNoTrain.create(inputtokens = max_length+1, 
-                                                                                  vocabsize=vocab_size,
-                                                                                  seed=seed,
-                                                                                  lstmunits=int(params[0]), 
-                                                                                  denseunits=int(params[1]), 
-                                                                                  embedding=int(params[2])
-                                                                                  )
+                                    model_geom = model.LSTMAttModel.create(inputtokens = max_length+1, 
+                                                                           vocabsize=vocab_size,
+                                                                           seed=seed,
+                                                                           lstmunits=int(params[0]), 
+                                                                           denseunits=int(params[1]), 
+                                                                           embedding=int(params[2])
+                                                                           )
                                     
                             multi_model = model.ModelMGPU(model_geom, gpus=n_gpus, bridge_type=bridge_type)
                         else: # single GPU
-                            model_geom = model.LSTMAttModelNoTrain.create(inputtokens = max_length+1, 
-                                                                          vocabsize=vocab_size,
-                                                                          seed=seed, 
-                                                                          lstmunits=int(params[0]), 
-                                                                          denseunits=int(params[1]), 
-                                                                          embedding=int(params[2])
-                                                                          )
+                            model_geom = model.LSTMAttModel.create(inputtokens = max_length+1, 
+                                                                   vocabsize=vocab_size,
+                                                                   seed=seed, 
+                                                                   lstmunits=int(params[0]), 
+                                                                   denseunits=int(params[1]), 
+                                                                   embedding=int(params[2])
+                                                                   )
                             
                             multi_model = model_geom
                         # Compiling the model
