@@ -44,8 +44,8 @@ def Embedding_Vis(data,
         
     input_dir = outdir+'Main/'+'{}/{}/'.format(data_name,p_dir_temp)
     save_dir = outdir+'Embedding_Vis/'+'{}/{}/'.format(data_name,p_dir_temp)
-    input_dir_run = input_dir+'fold_{}/run_{}/'.format(k_fold_index, run_index+1)
-    os.makedirs(input_dir_run, exist_ok=True)
+    input_dir_run = input_dir+'fold_{}/run_{}/'.format(k_fold_index, run_index)
+    os.makedirs(save_dir, exist_ok=True)
     
     print("***SMILES_X for embedding visualization starts...***\n\n")
     np.random.seed(seed=123)
@@ -130,18 +130,18 @@ def Embedding_Vis(data,
             int_to_token = token.get_inttotoken(tokens)
 
             # Gives me an init error. Fixed the get_config, but need to retrain to make it work.
-            # model_train = load_model(input_dir_run+data_name+'_model.best_fold_'+str(k_fold_index)+'_run_'+str(run_index)+'.hdf5',
-            #                        custom_objects={'AttentionMNotrain': model.AttentionM(seed=5)})
+            model_train = load_model(input_dir_run+data_name+'_model.best_fold_'+str(k_fold_index)+'_run_'+str(run_index)+'.hdf5',
+                                   custom_objects={'AttentionM': model.AttentionM(seed=5)})
             # So far will just rebuild the model and load the weights
 
-            model_train = model.LSTMAttModel.create(inputtokens = max_length+1, 
-                                                    vocabsize = vocab_size,
-                                                    seed=0,
-                                                    lstmunits= int(16), 
-                                                    denseunits = int(16), 
-                                                    embedding = int(32)
-                                                    )
-            model_train.load_weights(input_dir_run+data_name+'_model.best_fold_'+str(k_fold_index)+'_run_'+str(run_index)+'.hdf5')
+            # model_train = model.LSTMAttModel.create(inputtokens = max_length+1, 
+            #                                         vocabsize = vocab_size,
+            #                                         seed=0,
+            #                                         lstmunits= int(16), 
+            #                                         denseunits = int(16), 
+            #                                         embedding = int(32)
+            #                                         )
+            # model_train.load_weights(input_dir_run+data_name+'_model.best_fold_'+str(k_fold_index)+'_run_'+str(run_index)+'.hdf5')
 
             print("Chosen model summary:\n")
             print(model_train.summary())
