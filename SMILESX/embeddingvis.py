@@ -49,10 +49,6 @@ def Embedding_Vis(data,
     
     print("***SMILES_X for embedding visualization starts...***\n\n")
     np.random.seed(seed=123)
-    # The following line is not necessary for the code, but as soon as I used the SMILES-X for 
-    # LTE prediction with this code, to keep the kfold split the same,
-    # I should preserve this line so far
-    seed_list = np.random.randint(int(1e6), size = k_fold_number).tolist()
 
     # Train/validation/test data splitting - 80/10/10 % at random with diff. seeds for k_fold_number times
     kfold = KFold(k_fold_number, shuffle = True)
@@ -129,19 +125,8 @@ def Embedding_Vis(data,
             token_to_int = token.get_tokentoint(tokens)
             int_to_token = token.get_inttotoken(tokens)
 
-            # Gives me an init error. Fixed the get_config, but need to retrain to make it work.
             model_train = load_model(input_dir_run+data_name+'_model.best_fold_'+str(k_fold_index)+'_run_'+str(run_index)+'.hdf5',
                                    custom_objects={'AttentionM': model.AttentionM(seed=5)})
-            # So far will just rebuild the model and load the weights
-
-            # model_train = model.LSTMAttModel.create(inputtokens = max_length+1, 
-            #                                         vocabsize = vocab_size,
-            #                                         seed=0,
-            #                                         lstmunits= int(16), 
-            #                                         denseunits = int(16), 
-            #                                         embedding = int(32)
-            #                                         )
-            # model_train.load_weights(input_dir_run+data_name+'_model.best_fold_'+str(k_fold_index)+'_run_'+str(run_index)+'.hdf5')
 
             print("Chosen model summary:\n")
             print(model_train.summary())
