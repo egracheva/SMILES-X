@@ -24,7 +24,6 @@ from keras.callbacks import Callback
 
 ## Custom attention layer
 # modified from https://github.com/sujitpal/eeap-examples
-
 class AttentionM(Layer):
     """
     Keras layer to compute an attention vector on an incoming matrix.
@@ -45,10 +44,10 @@ class AttentionM(Layer):
     def build(self, input_shape):
         # W: (EMBED_SIZE, 1)
         # b: (MAX_TIMESTEPS,)
-        self.W = self.add_seed(name="W_{:s}".format(self.name), 
+        self.W = self.add_weight(name="W_{:s}".format(self.name), 
                                  shape=(input_shape[-1], 1),
                                  initializer=initializers.glorot_normal(seed=self.seed))
-        self.b = self.add_seed(name="b_{:s}".format(self.name),
+        self.b = self.add_weight(name="b_{:s}".format(self.name),
                                  shape=(input_shape[1], 1),
                                  initializer="zeros")
         super(AttentionM, self).build(input_shape)
@@ -68,7 +67,7 @@ class AttentionM(Layer):
         ot = x * atx
         # output: (BATCH_SIZE, EMBED_SIZE)
         if self.return_probabilities: 
-            return atx # for visualization of the attention seeds
+            return atx # for visualization of the attention weights
         else:
             return K.sum(ot, axis=1) # for prediction
 
@@ -83,7 +82,9 @@ class AttentionM(Layer):
 
 
     def get_config(self):
-        return super(AttentionM, self).get_config()
+        base_config = super(AttentionM, self).get_config()
+        base_config['seed'] = self.seed
+        return base_config
 ##
     
 ## Neural architecture of the SMILES-X
@@ -123,7 +124,6 @@ class LSTMAttModel():
 
 
         return model
-##
 
 ## Function to fit a model on a multi-GPU machine
 class ModelMGPU(Model):
@@ -143,7 +143,7 @@ class ModelMGPU(Model):
 
     def __getattribute__(self, attrname):
         '''Override load and save methods to be used from the serial-model. The
-        serial-model holds references to the seeds in the multi-gpu model.
+        serial-model holds references to the weights in the multi-gpu model.
         '''
         # return Model.__getattribute__(self, attrname)
         if 'load' in attrname or 'save' in attrname:
@@ -152,7 +152,7 @@ class ModelMGPU(Model):
         return super(ModelMGPU, self).__getattribute__(attrname)
 ##
 class IgnoreBeginningSaveBest(Callback):
-            """Save the best seeds only after some number of epochs has been trained
+            """Save the best weights only after some number of epochs has been trained
     
             Arguments:
             filepath -- where to save the resulting model
@@ -167,8 +167,8 @@ class IgnoreBeginningSaveBest(Callback):
                 self.ignore_first_epochs = ignore_first_epochs
                 self.best = best
 
-                # best_seeds to store the seeds at which the minimum loss occurs.
-                self.best_seeds = None
+                # best_weights to store the weights at which the minimum loss occurs.
+                self.best_weights = None
 
             def on_train_begin(self, logs=None):
                 # The epoch the training stops at.
@@ -176,21 +176,26 @@ class IgnoreBeginningSaveBest(Callback):
 
             def on_epoch_end(self, epoch, logs=None):
                 current = logs.get('val_loss')
+                if epoch%10==0:
+                    print("Finished the {}-th epoch".format(epoch))
                 if epoch>self.ignore_first_epochs:
                     if np.less(current, self.best):
-                        print("Current epochs is better the previous best loss")
-                        print("Validation loss is:")
-                        print(current)
                         self.best = current
-                        # Record the best seeds if the current result is better (less).
-                        self.best_seeds = self.model.get_seeds()
+                        # Record the best weights if the current result is better (less).
+                        self.best_weights = self.model.get_weights()
                         self.best_epoch = epoch
+                        
                     
             def on_train_end(self, logs=None):
                 print("The model will be based on the epoch #{}".format(self.best_epoch))
-                print('Restoring model seeds from the end of the best epoch.')
-                if self.best_seeds is not None:
-                    self.model.set_seeds(self.best_seeds)
-                # Save the final model
-                self.model.save(self.filepath)
+                print('Restoring model weights from the end of the best epoch.')
+                if self.best_weights is not None:
+                    self.model.set_weights(self.best_weights)
+                    # Save the final model
+                    self.model.save(self.filepath)
+                    print("The best achieved validation loss is {}".format(self.best))
+                else:
+                    print("The best achieved validation loss is {}".format(self.best))
+                
+                
 ##
