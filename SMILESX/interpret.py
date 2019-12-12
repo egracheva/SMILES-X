@@ -212,7 +212,6 @@ def Interpretation(data,
 
             for mols_id in range(len(smiles_list_toviz)):
                 ienumcard = smiles_toviz_x_card_cumsum_shift_viz[mols_id]
-                print(smiles_toviz_x_enum_tokens[ienumcard])
             
                 smiles_len_tmp = len(smiles_toviz_x_enum_tokens[ienumcard])
                 intermediate_output_tmp = intermediate_output[ienumcard,-smiles_len_tmp+1:-1].flatten().reshape(1,-1)
@@ -252,10 +251,7 @@ def Interpretation(data,
                                                  contourLines = 10,
                                                  alpha = 0.25)
                 fig.savefig('{}Interpretation_2D_{}_fold_{}_run_{}_mol_{}.png'.format(save_dir, data_name, k_fold_index, run_index, mols_id), bbox_inches='tight')                
-            
-
-                model_topredict.compile(loss="mse", optimizer='adam', metrics=[metrics.mae,metrics.mse])
-                
+                            
                 y_pred_test_tmp = model_topredict.predict(smiles_toviz_x_enum_tokens_tointvec[ienumcard].reshape(1,-1))[0,0]
                 y_test_tmp = smiles_toviz_y_enum[ienumcard,0]
                 precision_predicted = (np.abs(np.floor(np.log10(scaler.inverse_transform(y_pred_test_tmp.reshape(1, -1))[0][0])))+3)/10
