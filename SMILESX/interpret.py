@@ -232,14 +232,22 @@ def Interpretation(data,
                 y_pred_test_tmp = model_topredict.predict(smiles_toviz_x_enum_tokens_tointvec[ienumcard].reshape(1,-1))[0,0]
                 y_test_tmp = smiles_toviz_y_enum[ienumcard, 0]
                 y_pred_test_tmp_scaled = scaler.inverse_transform(y_pred_test_tmp.reshape(1, -1))[0][0]
-                precision_predicted = (np.abs(np.floor(np.log10(y_pred_test_tmp_scaled)))+3)/10
+                # Getting automatic precision computed
+                if np.log10(y_pred_test_tmp_scaled)>0:
+                    if np.log10(y_pred_test_tmp_scaled)<3:
+                        precision = 1+(3-np.floor(np.log10(y_pred_test_tmp_scaled)))/10
+                    else:
+                        precision = 1.0
+                else:
+                    precision = (np.abs(np.floor(np.log10(y_pred_test_tmp_scaled)))+3)/10
+                    
                 if not np.isnan(y_test_tmp):
                     print("True value: {0:{2}f} Predicted: {1:{2}f}".format(y_test_tmp,
                                                                             y_pred_test_tmp_scaled,
-                                                                            precision_predicted))
+                                                                            precision))
                 else:
                     print("Predicted: {0:{1}f}".format(y_pred_test_tmp_scaled,
-                                                       precision_predicted))
+                                                       precision))
 
                 smiles_tmp = smiles_toviz_x_enum[ienumcard]
                 mol_tmp = Chem.MolFromSmiles(smiles_tmp)
@@ -259,8 +267,8 @@ def Interpretation(data,
                                                      scale=-1,  
                                                      sigma=0.05,
                                                      weights=norm_weights,
-                                                     pred_val = "{0:{1}f}".format(y_pred_test_tmp_scaled, precision_predicted),
-                                                     true_val = "{0:{1}f}".format(y_test_tmp, precision_predicted),
+                                                     pred_val = "{0:{1}f}".format(y_pred_test_tmp_scaled, precision),
+                                                     true_val = "{0:{1}f}".format(y_test_tmp, precision),
                                                      colorMap='Reds', 
                                                      contourLines = 10,
                                                      alpha = 0.25)
@@ -270,7 +278,7 @@ def Interpretation(data,
                                                      scale=-1,  
                                                      sigma=0.05,
                                                      weights=norm_weights,
-                                                     pred_val = "{0:{1}f}".format(y_pred_test_tmp_scaled, precision_predicted),
+                                                     pred_val = "{0:{1}f}".format(y_pred_test_tmp_scaled, precision),
                                                      colorMap='Reds', 
                                                      contourLines = 10,
                                                      alpha = 0.25)

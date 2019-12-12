@@ -555,7 +555,14 @@ def Main(data,
                 # RMSE
                 rmse = np.sqrt(mean_squared_error(y_true[name], y_preds_mean[name]))
                 # Setup the precision of the displayed error to print it cleanly
-                precision_rmse = (np.abs(np.floor(np.log10(rmse)))+3)/10
+                if np.log10(rmse)>0:
+                    if np.log10(rmse)<3:
+                        precision_rmse = 1+(3-np.floor(np.log10(rmse)))/10
+                    else:
+                        precision_rmse = 1.0
+                else:
+                    precision_rmse = (np.abs(np.floor(np.log10(rmse)))+3)/10
+
                 # Error on RMSE when taking into account error on predictions only
                 d_rmse = np.sqrt(np.square(y_true[name]-y_preds_mean[name]).dot(np.square(y_preds_sigma[name]))/N/ssres)
                 # Error on RMSE when taking into account both errors on predictions and true data
@@ -563,11 +570,19 @@ def Main(data,
                 # MAE
                 mae = mean_absolute_error(y_true[name], y_preds_mean[name])
                 # Setup the precision of the displayed error to print it cleanly
-                precision_mae = (np.abs(np.floor(np.log10(mae)))+3)/10
+                if np.log10(mae)>0:
+                    if np.log10(rmse)<3:
+                        precision_mae = 1+(3-np.floor(np.log10(mae)))/10
+                    else:
+                        precision_mae = 1.0
+                else:
+                    precision_mae = (np.abs(np.floor(np.log10(mae)))+3)/10
                 # Error on RMSE when taking into account error on predictions only
                 d_mae = np.sqrt(np.sum(np.square(y_preds_sigma[name])))/N
                 # Error on RMSE when taking into account both errors on predictions and true data
                 d_mae_exp = np.sqrt(np.sum(np.square(y_preds_sigma[name]) + np.square(y_err[name])))/N
+
+
 
                 print("Averaged R^2: {0:0.4f}+-{1:0.4f}({2:0.4f})".format(r2, d_r2, d_r2_exp[0]))
                 print("Averaged RMSE: {0:{3}f}+-{1:{3}f}({2:{3}f})".format(rmse, d_rmse, d_rmse_exp[0], precision_rmse))
