@@ -69,7 +69,11 @@ K.set_session(sess)  # set this TensorFlow session as the default session for Ke
 # n_gpus: number of GPUs to be used in parallel (Default: 1)
 # bridge_type: bridge's type to be used by GPUs (e.g. 'NVLink' or 'None') (Default: 'None')
 # patience: number of epochs to respect before stopping a training after minimal validation's error (Default: 25)
-# n_epochs: maximum of epochs for training (Default: 1000)
+# n_epochs: maximum of epochs for training (Default: 200)
+# best_seed: the seed for the weights initialization (Default: 0)
+# ignore_first_epochs: number of epochs to ignore during training (Default: 100)
+# prec: precision of the displayed values (Default: 4 significant numbers)
+
 # returns:
 #         Tokens list (Vocabulary) -> *.txt
 #         Best architecture -> *.hdf5
@@ -96,9 +100,10 @@ def Main(data,
          embedding_ref = 2,
          batch_size_ref = 64,
          alpha_ref = 2.8,
-         best_seed = -0.5,
-         n_epochs = 100,
-         ignore_first_epochs = 1):
+         best_seed = 0,
+         n_epochs = 200,
+         ignore_first_epochs = 1,
+         prec = 4):
     
     if augmentation:
         p_dir_temp = 'Augm'
@@ -556,12 +561,12 @@ def Main(data,
                 rmse = np.sqrt(mean_squared_error(y_true[name], y_preds_mean[name]))
                 # Setup the precision of the displayed error to print it cleanly
                 if np.log10(rmse)>0:
-                    if np.log10(rmse)<3:
-                        precision_rmse = 1+(3-np.floor(np.log10(rmse)))/10
+                    if np.log10(rmse)<prec-1:
+                        precision_rmse = 1+(prec-1-np.floor(np.log10(rmse)))/10
                     else:
                         precision_rmse = 1.0
                 else:
-                    precision_rmse = (np.abs(np.floor(np.log10(rmse)))+3)/10
+                    precision_rmse = (np.abs(np.floor(np.log10(rmse)))+prec-1)/10
 
                 # Error on RMSE when taking into account error on predictions only
                 d_rmse = np.sqrt(np.square(y_true[name]-y_preds_mean[name]).dot(np.square(y_preds_sigma[name]))/N/ssres)
@@ -571,12 +576,12 @@ def Main(data,
                 mae = mean_absolute_error(y_true[name], y_preds_mean[name])
                 # Setup the precision of the displayed error to print it cleanly
                 if np.log10(mae)>0:
-                    if np.log10(rmse)<3:
-                        precision_mae = 1+(3-np.floor(np.log10(mae)))/10
+                    if np.log10(rmse)<prec-1:
+                        precision_mae = 1+(prec-1-np.floor(np.log10(mae)))/10
                     else:
                         precision_mae = 1.0
                 else:
-                    precision_mae = (np.abs(np.floor(np.log10(mae)))+3)/10
+                    precision_mae = (np.abs(np.floor(np.log10(mae)))+prec-1)/10
                 # Error on RMSE when taking into account error on predictions only
                 d_mae = np.sqrt(np.sum(np.square(y_preds_sigma[name])))/N
                 # Error on RMSE when taking into account both errors on predictions and true data

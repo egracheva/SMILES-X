@@ -39,6 +39,7 @@ K.set_session(sess)  # set this TensorFlow session as the default session for Ke
 # smiles_toviz: targeted SMILES to visualize (Default: 'CCC')
 # font_size: font's size for writing SMILES tokens (Default: 15)
 # font_rotation: font's orientation (Default: 'horizontal')
+# prec: precision of the displayed values (Default: 4 significant numbers)
 # returns:
 #         The 1D and 2D attention maps 
 #             The redder and darker the color is, 
@@ -56,7 +57,8 @@ def Interpretation(data,
                    outdir = "./data/", 
                    smiles_list_toviz = ['CCC'], 
                    font_size = 15, 
-                   font_rotation = 'horizontal'):
+                   font_rotation = 'horizontal',
+                   prec = 4):
     
     if augmentation:
         p_dir_temp = 'Augm'
@@ -234,13 +236,13 @@ def Interpretation(data,
                 y_pred_test_tmp_scaled = scaler.inverse_transform(y_pred_test_tmp.reshape(1, -1))[0][0]
                 # Getting automatic precision computed
                 if np.log10(y_pred_test_tmp_scaled)>0:
-                    if np.log10(y_pred_test_tmp_scaled)<3:
-                        precision = 1+(3-np.floor(np.log10(y_pred_test_tmp_scaled)))/10
+                    if np.log10(y_pred_test_tmp_scaled)<prec-1:
+                        precision = 1+(prec-1-np.floor(np.log10(y_pred_test_tmp_scaled)))/10
                     else:
                         precision = 1.0
                 else:
-                    precision = (np.abs(np.floor(np.log10(y_pred_test_tmp_scaled)))+3)/10
-                    
+                    precision = (np.abs(np.floor(np.log10(y_pred_test_tmp_scaled)))+prec-1)/10
+
                 if not np.isnan(y_test_tmp):
                     print("True value: {0:{2}f} Predicted: {1:{2}f}".format(y_test_tmp,
                                                                             y_pred_test_tmp_scaled,
