@@ -30,7 +30,7 @@ K.set_session(sess)  # set this TensorFlow session as the default session for Ke
 def Inference(data_name, 
               smiles_list = ['CC','CCC','C=O'], 
               data_units = '',
-              k_fold_number = 8,
+              k_fold_number = 10,
               folds_of_interest = False,
               n_runs = 1,
               augmentation = False, 
@@ -137,6 +137,7 @@ def Inference(data_name,
                 smiles_y_pred_mean, _ = utils.mean_median_result(smiles_x_enum_card, smiles_y_pred)
                 
                 smiles_y_pred_mean_array = np.append(smiles_y_pred_mean_array, smiles_y_pred_mean.reshape(1,-1), axis = 0)
+            ifold += 1
         else:
             ifold += 1
 
