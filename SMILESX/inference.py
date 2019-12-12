@@ -32,7 +32,7 @@ def Inference(data_name,
               data_units = '',
               k_fold_number = 8,
               augmentation = False, 
-              outdir = "../data/"):
+              outdir = "./data/"):
     
     if augmentation:
         p_dir_temp = 'Augm'
@@ -87,12 +87,12 @@ def Inference(data_name,
     # Tokenize SMILES 
     smiles_x_enum_tokens = token.get_tokens(smiles_x_enum)
 
+    # Tokens as a list
+    tokens = token.get_vocab(input_dir+data_name+'_Vocabulary.txt')
+
     # models ensembling
     smiles_y_pred_mean_array = np.empty(shape=(0,len(smiles_checked)), dtype='float')
-    for ifold in range(k_fold_number):
-        
-        # Tokens as a list
-        tokens = token.get_vocab(input_dir+data_name+'_tokens_set_fold_'+str(ifold)+'.txt')
+    for ifold in range(k_fold_number):        
         # Add 'pad', 'unk' tokens to the existing list
         vocab_size = len(tokens)
         tokens, vocab_size = token.add_extra_tokens(tokens, vocab_size)
