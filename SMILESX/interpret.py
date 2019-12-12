@@ -58,7 +58,8 @@ def Interpretation(data,
                    smiles_list_toviz = ['CCC'], 
                    font_size = 15, 
                    font_rotation = 'horizontal',
-                   prec = 4):
+                   prec = 4,
+                   tag = ''):
     
     if augmentation:
         p_dir_temp = 'Augm'
@@ -229,7 +230,7 @@ def Interpretation(data,
                            fontsize = font_size, 
                            rotation = font_rotation)
                 plt.yticks([])
-                plt.savefig('{}Interpretation_1D_{}_fold_{}_run_{}_mol_{}.png'.format(save_dir, data_name, k_fold_index, run_index, mols_id), bbox_inches='tight')
+                plt.savefig('{}Interpretation_1D_{}_fold_{}_run_{}_mol_{}_{}.png'.format(save_dir, data_name, k_fold_index, run_index, mols_id, tag), bbox_inches='tight')
             
                 y_pred_test_tmp = model_topredict.predict(smiles_toviz_x_enum_tokens_tointvec[ienumcard].reshape(1,-1))[0,0]
                 y_test_tmp = smiles_toviz_y_enum[ienumcard, 0]
@@ -284,7 +285,7 @@ def Interpretation(data,
                                                      colorMap='Reds', 
                                                      contourLines = 10,
                                                      alpha = 0.25)
-                fig.savefig('{}Interpretation_2D_{}_fold_{}_run_{}_mol_{}.png'.format(save_dir, data_name, k_fold_index, run_index, mols_id), bbox_inches='tight')                
+                fig.savefig('{}Interpretation_2D_{}_fold_{}_run_{}_mol_{}_{}.png'.format(save_dir, data_name, k_fold_index, run_index, mols_id, tag), bbox_inches='tight')                
                 
                 smiles_len_tmp = len(smiles_toviz_x_enum_tokens[ienumcard])
                 diff_topred_list = list()
@@ -316,7 +317,7 @@ def Interpretation(data,
                            rotation = font_rotation)
                 plt.yticks(fontsize = 20)
                 plt.ylabel('Temporal relative distance', fontsize = 25, labelpad = 15)
-                plt.savefig('{}Interpretation_temporal_{}_fold_{}_run_{}_mol_{}.png'.format(save_dir, data_name, k_fold_index, run_index, mols_id), bbox_inches='tight')
+                plt.savefig('{}Interpretation_temporal_{}_fold_{}_run_{}_mol_{}_{}.png'.format(save_dir, data_name, k_fold_index, run_index, mols_id, tag), bbox_inches='tight')
             ifold +=1
         else:
             ifold += 1
