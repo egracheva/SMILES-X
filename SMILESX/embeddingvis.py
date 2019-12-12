@@ -46,6 +46,20 @@ def Embedding_Vis(data,
     save_dir = outdir+'Embedding_Vis/'+'{}/{}/'.format(data_name,p_dir_temp)
     input_dir_run = input_dir+'fold_{}/run_{}/'.format(k_fold_index, run_index)
     os.makedirs(save_dir, exist_ok=True)
+
+    # Check if the vocabulary for current dataset exists already
+    if os.path.exists(input_dir+data_name+'_Vocabulary.txt'):
+        tokens = token.get_vocab(input_dir+data_name+'_Vocabulary.txt')
+    else:
+        "Vocabulary file does not exist. Are you sure you have already trained the model?"
+    vocab_size = len(tokens)
+
+    # Add 'pad', 'unk' tokens to the existing list
+    tokens, vocab_size = token.add_extra_tokens(tokens, vocab_size)
+
+    # Transformation of tokenized SMILES to vector of intergers and vice-versa
+    token_to_int = token.get_tokentoint(tokens)
+    int_to_token = token.get_inttotoken(tokens)
     
     print("***SMILES_X for embedding visualization starts...***\n\n")
     np.random.seed(seed=123)
@@ -68,7 +82,7 @@ def Embedding_Vis(data,
                                train_val_idx=train_val_idx,
                                test_idx=test_idx,                                                         
                                scaling = True)
-          
+
             # data augmentation or not
             if augmentation == True:
                 print("***Data augmentation.***\n")
@@ -98,35 +112,22 @@ def Embedding_Vis(data,
             x_test_enum_tokens = token.get_tokens(x_test_enum)
 
             print("Examples of tokenized SMILES from a training set:\n{}\n".\
-            format(x_train_enum_tokens[:5]))
-
-            # Vocabulary size computation
-            all_smiles_tokens = x_train_enum_tokens+x_valid_enum_tokens+x_test_enum_tokens
-            tokens = token.extract_vocab(all_smiles_tokens)
-            vocab_size = len(tokens)
+            format(x_train_enum_tokens[:3]))
 
             train_unique_tokens = list(token.extract_vocab(x_train_enum_tokens))
             print(train_unique_tokens)
             print("Number of tokens only present in a training set: {}\n".format(len(train_unique_tokens)))
             train_unique_tokens.insert(0,'pad')
-            
-            # Tokens as a list
-            tokens = token.get_vocab(input_dir+data_name+'_tokens_set_fold_'+str(k_fold_index)+'.txt')
-            # Add 'pad', 'unk' tokens to the existing list
-            tokens, vocab_size = token.add_extra_tokens(tokens, vocab_size)
-            
+
             print("Full vocabulary: {}\nOf size: {}\n".format(tokens, vocab_size))
 
             # Maximum of length of SMILES to process
+            all_smiles_tokens = x_train_enum_tokens+x_valid_enum_tokens+x_test_enum_tokens
             max_length = np.max([len(ismiles) for ismiles in all_smiles_tokens])
             print("Maximum length of tokenized SMILES: {} tokens (termination spaces included)\n".format(max_length))
 
-            # Transformation of tokenized SMILES to vector of intergers and vice-versa
-            token_to_int = token.get_tokentoint(tokens)
-            int_to_token = token.get_inttotoken(tokens)
-
             model_train = load_model(input_dir_run+data_name+'_model.best_fold_'+str(k_fold_index)+'_run_'+str(run_index)+'.hdf5',
-                                   custom_objects={'AttentionM': model.AttentionM(seed=5)})
+                                   custom_objects={'AttentionM': model.AttentionM(seed=0)})
 
             print("Chosen model summary:\n")
             print(model_train.summary())
