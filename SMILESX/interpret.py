@@ -229,6 +229,17 @@ def Interpretation(data,
                 plt.yticks([])
                 plt.savefig('{}Interpretation_1D_{}_fold_{}_run_{}_mol_{}.png'.format(save_dir, data_name, k_fold_index, run_index, mols_id), bbox_inches='tight')
             
+                y_pred_test_tmp = model_topredict.predict(smiles_toviz_x_enum_tokens_tointvec[ienumcard].reshape(1,-1))[0,0]
+                y_test_tmp = smiles_toviz_y_enum[ienumcard, 0]
+                y_pred_test_tmp_scaled = scaler.inverse_transform(y_pred_test_tmp.reshape(1, -1))[0][0]
+                precision_predicted = (np.abs(np.floor(np.log10(y_pred_test_tmp_scaled)))+3)/10
+                if not np.isnan(y_test_tmp):
+                    print("True value: {0:{2}f} Predicted: {1:{2}f}".format(y_test_tmp,
+                                                                            y_pred_test_tmp_scaled,
+                                                                            precision_predicted))
+                else:
+                    print("Predicted: {0:{1}f}".format(y_pred_test_tmp_scaled,
+                                                       precision_predicted))
 
                 smiles_tmp = smiles_toviz_x_enum[ienumcard]
                 mol_tmp = Chem.MolFromSmiles(smiles_tmp)
@@ -242,26 +253,28 @@ def Interpretation(data,
 
                 minmaxscaler = MinMaxScaler(feature_range=(0,1))
                 norm_weights = minmaxscaler.fit_transform(mol_df_tmp.iloc[:,1].values.reshape(-1,1)).flatten().tolist()
-                fig = GetSimilarityMapFromWeights(mol=mol_tmp, 
-                                                 size = (250,250), 
-                                                 scale=-1,  
-                                                 sigma=0.05,
-                                                 weights=norm_weights, 
-                                                 colorMap='Reds', 
-                                                 contourLines = 10,
-                                                 alpha = 0.25)
-                fig.savefig('{}Interpretation_2D_{}_fold_{}_run_{}_mol_{}.png'.format(save_dir, data_name, k_fold_index, run_index, mols_id), bbox_inches='tight')                
-                            
-                y_pred_test_tmp = model_topredict.predict(smiles_toviz_x_enum_tokens_tointvec[ienumcard].reshape(1,-1))[0,0]
-                y_test_tmp = smiles_toviz_y_enum[ienumcard,0]
-                precision_predicted = (np.abs(np.floor(np.log10(scaler.inverse_transform(y_pred_test_tmp.reshape(1, -1))[0][0])))+3)/10
                 if not np.isnan(y_test_tmp):
-                    print("True value: {0:{2}f} Predicted: {1:{2}f}".format(y_test_tmp,
-                                                                            scaler.inverse_transform(y_pred_test_tmp.reshape(1, -1))[0][0],
-                                                                            precision_predicted))
+                    fig = GetSimilarityMapFromWeights(mol=mol_tmp, 
+                                                     size = (250,250), 
+                                                     scale=-1,  
+                                                     sigma=0.05,
+                                                     weights=norm_weights,
+                                                     pred_val = "{0:{1}f}".format(y_pred_test_tmp_scaled, precision_predicted),
+                                                     true_val = "{0:{1}f}".format(y_test_tmp, precision_predicted),
+                                                     colorMap='Reds', 
+                                                     contourLines = 10,
+                                                     alpha = 0.25)
                 else:
-                    print("Predicted: {0:{1}f}".format(scaler.inverse_transform(y_pred_test_tmp.reshape(1, -1))[0][0],
-                                                       precision_predicted))
+                    fig = GetSimilarityMapFromWeights(mol=mol_tmp, 
+                                                     size = (250,250), 
+                                                     scale=-1,  
+                                                     sigma=0.05,
+                                                     weights=norm_weights,
+                                                     pred_val = "{0:{1}f}".format(y_pred_test_tmp_scaled, precision_predicted),
+                                                     colorMap='Reds', 
+                                                     contourLines = 10,
+                                                     alpha = 0.25)
+                fig.savefig('{}Interpretation_2D_{}_fold_{}_run_{}_mol_{}.png'.format(save_dir, data_name, k_fold_index, run_index, mols_id), bbox_inches='tight')                
                 
                 smiles_len_tmp = len(smiles_toviz_x_enum_tokens[ienumcard])
                 diff_topred_list = list()
@@ -304,7 +317,7 @@ def Interpretation(data,
 # from https://github.com/rdkit/rdkit/blob/24f1737839c9302489cadc473d8d9196ad9187b4/rdkit/Chem/Draw/SimilarityMaps.py
 # returns:
 #         a similarity map for a molecule given the attention weights
-def GetSimilarityMapFromWeights(mol, weights, colorMap=None, scale=-1, size=(250, 250),
+def GetSimilarityMapFromWeights(mol, weights, pred_val, true_val=None, colorMap=None, scale=-1, size=(250, 250),
                                 sigma=None, coordScale=1.5, step=0.01, colors='k', contourLines=10,
                                 alpha=0.5, **kwargs):
     """
@@ -327,6 +340,8 @@ def GetSimilarityMapFromWeights(mol, weights, colorMap=None, scale=-1, size=(250
     if mol.GetNumAtoms() < 2:
         raise ValueError("too few atoms")
     fig = Draw.MolToMPL(mol, coordScale=coordScale, size=size, **kwargs)
+    ax = fig.gca()
+
     if sigma is None:
         if mol.GetNumBonds() > 0:
             bond = mol.GetBondWithIdx(0)
@@ -345,17 +360,33 @@ def GetSimilarityMapFromWeights(mol, weights, colorMap=None, scale=-1, size=(250
     else:
         maxScale = scale
     
-    fig.axes[0].imshow(z, cmap=colorMap, interpolation='bilinear', origin='lower',
+    # fig.axes[0].imshow(z, cmap=colorMap, interpolation='bilinear', origin='lower',
+    #                  extent=(0, 1, 0, 1), vmin=minScale, vmax=maxScale)
+    ax.imshow(z, cmap=colorMap, interpolation='bilinear', origin='lower',
                      extent=(0, 1, 0, 1), vmin=minScale, vmax=maxScale)
     # contour lines
     # only draw them when at least one weight is not zero
     if len([w for w in weights if w != 0.0]):
-        contourset = fig.axes[0].contour(x, y, z, contourLines, colors=colors, alpha=alpha, **kwargs)
+        contourset = ax.contour(x, y, z, contourLines, colors=colors, alpha=alpha, **kwargs)
         for j, c in enumerate(contourset.collections):
             if contourset.levels[j] == 0.0:
                 c.set_linewidth(0.0)
             elif contourset.levels[j] < 0:
                 c.set_dashes([(0, (3.0, 3.0))])
-    fig.axes[0].set_axis_off()
+    if true_val:
+        ax.text(0.97, 0.02, "Predicted value: "+pred_val,
+        verticalalignment='bottom', horizontalalignment='right',
+        transform=ax.transAxes,
+        color='black', fontsize=12)
+        ax.text(0.97, 0.06, "True value: "+true_val,
+        verticalalignment='bottom', horizontalalignment='right',
+        transform=ax.transAxes,
+        color='black', fontsize=12)
+    else:
+        ax.text(0.97, 0.02, "Predicted value: "+pred_val,
+        verticalalignment='bottom', horizontalalignment='right',
+        transform=ax.transAxes,
+        color='black', fontsize=12)
+    ax.set_axis_off()
     return fig
 ##
