@@ -2,10 +2,15 @@ import numpy as np
 import pandas as pd
 import os
 import math
-# # For fixing the GPU in use
-# os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID";
-# # The GPU id to use (e.g. "0", "1", etc.)
-# os.environ["CUDA_VISIBLE_DEVICES"]="2";
+import time
+
+
+from keras.models import load_model
+
+# For fixing the GPU in use
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID";
+# The GPU id to use (e.g. "0", "1", etc.)
+os.environ["CUDA_VISIBLE_DEVICES"]="0";
 
 import matplotlib.pyplot as plt
 
@@ -29,6 +34,7 @@ from sklearn.model_selection import KFold
 
 from SMILESX import utils, token, augm, model
 import pygmo as pg
+
 
 np.set_printoptions(precision=3)
 # 
@@ -63,7 +69,11 @@ K.set_session(sess)  # set this TensorFlow session as the default session for Ke
 # n_gpus: number of GPUs to be used in parallel (Default: 1)
 # bridge_type: bridge's type to be used by GPUs (e.g. 'NVLink' or 'None') (Default: 'None')
 # patience: number of epochs to respect before stopping a training after minimal validation's error (Default: 25)
-# n_epochs: maximum of epochs for training (Default: 1000)
+# n_epochs: maximum of epochs for training (Default: 200)
+# best_seed: the seed for the weights initialization (Default: 0)
+# ignore_first_epochs: number of epochs to ignore during training (Default: 100)
+# prec: precision of the displayed values (Default: 4 significant numbers)
+
 # returns:
 #         Tokens list (Vocabulary) -> *.txt
 #         Best architecture -> *.hdf5
@@ -90,9 +100,10 @@ def Main(data,
          embedding_ref = 2,
          batch_size_ref = 64,
          alpha_ref = 2.8,
-         best_seed = -0.5,
-         n_epochs = 100,
-         ignore_first_epochs = 1):
+         best_seed = 0,
+         n_epochs = 200,
+         ignore_first_epochs = 1,
+         prec = 4):
     
     if augmentation:
         p_dir_temp = 'Augm'
@@ -104,8 +115,6 @@ def Main(data,
         
     print("***SMILES_X starts...***\n\n")
     np.random.seed(seed=123)
-    seed_list = np.random.randint(int(1e6), size = k_fold_number).tolist()
-    
     # Train/validation/test data splitting - 80/10/10 % at random with diff. seeds for k_fold_number times
     kfold = KFold(k_fold_number, shuffle = True)
     # If there is a list of folds of interest defined by the user
@@ -114,15 +123,17 @@ def Main(data,
     # If there is no defined list of the folds of interest, run for all folds
     else:
         folds = [n for n in range(0, k_fold_number)]
-        final_prediction = np.empty((len(data.smiles), n_runs), dtype = float)
     ifold = 0
-
+    output_data = data.copy()
     for train_val_idx, test_idx in kfold.split(data.smiles):
         if ifold in folds:        
             print("******")
             print("***Fold #{} initiated...***".format(ifold))
             print("******")
-        
+
+            save_dir_fold = save_dir+'fold_{}/'.format(ifold)
+            if not os.path.exists(save_dir_fold):
+                os.makedirs(save_dir_fold)
             print("***Sampling and splitting of the dataset.***\n")
             x_train, x_valid, x_test, y_train, y_valid, y_test, y_err, scaler = \
             utils.random_split(smiles_input=data.smiles,
@@ -144,10 +155,10 @@ def Main(data,
                 
             x_train_enum, x_train_enum_card, y_train_enum = \
             augm.Augmentation(x_train, y_train, canon=canonical, rotate=rotation)
-    
+
             x_valid_enum, x_valid_enum_card, y_valid_enum = \
             augm.Augmentation(x_valid, y_valid, canon=canonical, rotate=rotation)
-    
+
             x_test_enum, x_test_enum_card, y_test_enum = \
             augm.Augmentation(x_test, y_test, canon=canonical, rotate=rotation)
             
@@ -159,13 +170,20 @@ def Main(data,
             x_train_enum_tokens = token.get_tokens(x_train_enum)
             x_valid_enum_tokens = token.get_tokens(x_valid_enum)
             x_test_enum_tokens = token.get_tokens(x_test_enum)
-            
+
             print("Examples of tokenized SMILES from a training set:\n{}\n".\
-            format(x_train_enum_tokens[:5]))
+            format(x_train_enum_tokens[:3]))
             
             # Vocabulary size computation
             all_smiles_tokens = x_train_enum_tokens+x_valid_enum_tokens+x_test_enum_tokens
-            tokens = token.extract_vocab(all_smiles_tokens)
+
+            # Check if the vocabulary for current dataset exists already
+            if os.path.exists(save_dir+data_name+'_Vocabulary.txt'):
+                tokens = token.get_vocab(save_dir+data_name+'_Vocabulary.txt')
+            else:
+                tokens = token.extract_vocab(all_smiles_tokens)
+                token.save_vocab(tokens, save_dir+data_name+'_Vocabulary.txt')
+                tokens = token.get_vocab(save_dir+data_name+'_Vocabulary.txt')
             vocab_size = len(tokens)
             
             train_unique_tokens = token.extract_vocab(x_train_enum_tokens)
@@ -188,11 +206,7 @@ def Main(data,
                   format(test_unique_tokens.difference(valid_unique_tokens)))
             
             print("Full vocabulary: {}\nOf size: {}\n".format(tokens, vocab_size))
-            
-            # Save the vocabulary for re-use
-            token.save_vocab(tokens, save_dir+data_name+'_tokens_set_fold_'+str(ifold)+'.txt')
-            # Tokens as a list
-            tokens = token.get_vocab(save_dir+data_name+'_tokens_set_fold_'+str(ifold)+'.txt')
+
             # Add 'pad', 'unk' tokens to the existing list
             tokens, vocab_size = token.add_extra_tokens(tokens, vocab_size)
             
@@ -201,10 +215,6 @@ def Main(data,
             print("Maximum length of tokenized SMILES: {} tokens (termination spaces included)\n".format(max_length))
             
             print("***Optimization of the SMILESX's architecture.***\n")
-            # Transformation of tokenized SMILES to vector of intergers and vice-versa
-            token_to_int = token.get_tokentoint(tokens)
-            int_to_token = token.get_inttotoken(tokens)
-            
             if geomopt_on:
                 # Operate the first step of the optimization:
                 # geometry optimization (number of units in LSTM and Dense layers)
@@ -220,44 +230,40 @@ def Main(data,
                     x_geom_enum_tokens_tointvec = np.concatenate((x_train_enum_tokens_tointvec, x_valid_enum_tokens_tointvec), axis = 0)
                     y_geom_enum                 = np.concatenate((y_train_enum, y_valid_enum), axis = 0)
                     pred_scores = []
-                    for i, weight in enumerate(seed_range):
-                        #Changing weight into seed for the test
-                        # weight = weight*2+5
-                        # print(weight)
+                    for i, seed in enumerate(seed_range):
                         K.clear_session()
     
                         if n_gpus > 1:
                             if bridge_type == 'NVLink':
-                                model_geom = model.LSTMAttModelNoTrain.create(inputtokens=max_length+1, 
-                                                                              vocabsize=vocab_size,
-                                                                              weight=weight,
-                                                                              lstmunits=int(params[0]), 
-                                                                              denseunits=int(params[1]), 
-                                                                              embedding=int(params[2])
-                                                                              )
-                            else:
+                                model_geom = model.LSTMAttModel.create(inputtokens=max_length+1, 
+                                                                       vocabsize=vocab_size,
+                                                                       seed=seed,
+                                                                       lstmunits=int(params[0]), 
+                                                                       denseunits=int(params[1]), 
+                                                                       embedding=int(params[2])
+                                                                       )
+                            else: 
                                 with tf.device('/cpu'): # necessary to multi-GPU scaling
-                                    model_geom = model.LSTMAttModelNoTrain.create(inputtokens = max_length+1, 
-                                                                                  vocabsize=vocab_size,
-                                                                                  weight=weight,
-                                                                                  lstmunits=int(params[0]), 
-                                                                                  denseunits=int(params[1]), 
-                                                                                  embedding=int(params[2])
-                                                                                  )
+                                    model_geom = model.LSTMAttModel.create(inputtokens = max_length+1, 
+                                                                           vocabsize=vocab_size,
+                                                                           seed=seed,
+                                                                           lstmunits=int(params[0]), 
+                                                                           denseunits=int(params[1]), 
+                                                                           embedding=int(params[2])
+                                                                           )
                                     
                             multi_model = model.ModelMGPU(model_geom, gpus=n_gpus, bridge_type=bridge_type)
                         else: # single GPU
-                            model_geom = model.LSTMAttModelNoTrain.create(inputtokens = max_length+1, 
-                                                                          vocabsize=vocab_size,
-                                                                          weight=weight, 
-                                                                          lstmunits=int(params[0]), 
-                                                                          denseunits=int(params[1]), 
-                                                                          embedding=int(params[2])
-                                                                          )
+                            model_geom = model.LSTMAttModel.create(inputtokens = max_length+1, 
+                                                                   vocabsize=vocab_size,
+                                                                   seed=seed, 
+                                                                   lstmunits=int(params[0]), 
+                                                                   denseunits=int(params[1]), 
+                                                                   embedding=int(params[2])
+                                                                   )
                             
                             multi_model = model_geom
-                        # Compiling the model
-                        multi_model.compile(loss='mse', optimizer='sgd')
+
                         y_geom_pred = model_geom.predict(x_geom_enum_tokens_tointvec, verbose=0)
                         score = np.sqrt(mean_squared_error(scaler.inverse_transform(y_geom_enum), scaler.inverse_transform(y_geom_pred)))
                         pred_scores.append(score)
@@ -269,38 +275,40 @@ def Main(data,
                     return [mean_score, sigma_score, best_score, best_seed, n_nodes]
     
                 print("***Geometry search.***")
-                # start = time.time()
-                # Test each geometry using the single shared weight (all the weights are set to constant)
-                # The score is evaluated over the mean of the sulting predictions
-                # This is the way to test each geometry for "compatibility" with the data -- without training the model
-                # Read more in David Ha's article
-                scores = []
-                for n_lstm in geom_bounds[0]:
-                    for n_dense in geom_bounds[1]:
-                        for n_embed in geom_bounds[2]:
-                            scores.append([n_lstm, n_dense, n_embed] + create_mod_geom([n_lstm, n_dense, n_embed], seed_range))
+                if os.path.isfile(save_dir+'fold_{}/Scores.csv'.format(ifold)):
+                    scores = pd.read_csv(save_dir+'fold_{}/Scores.csv'.format(ifold))
+                else:
+                    scores = []
+                    for n_lstm in geom_bounds[0]:
+                        for n_dense in geom_bounds[1]:
+                            for n_embed in geom_bounds[2]:
+                                scores.append([n_lstm, n_dense, n_embed] + create_mod_geom([n_lstm, n_dense, n_embed], seed_range))
+                    pd.DataFrame(scores).to_csv(save_dir+'fold_{}/Scores.csv'.format(ifold), index=False)
+
                 scores = np.array(scores)
                 ## Multistage sorting procedure
-                ## Firstly, sort based on mean score and best score over weights
-                #points = scores[:, [4, 5]].tolist()
-                #sort_ind = pg.sort_population_mo(points)
-                sorted_scores = sorted(scores, key = lambda x: x[5])
+                ## Firstly, sort based on mean score and sigma over seeds
+                points = scores[:, [3, 4]].tolist()
+                sort_ind = pg.sort_population_mo(points)
+                # sorted_scores = sorted(scores, key = lambda x: x[5], reverse = True)
                 print("Re-ordered scores")
-                print(pd.DataFrame(sorted_scores[:10]))
+                # print(pd.DataFrame(sorted_scores[:10]))
+                print(pd.DataFrame(scores[sort_ind[:10]]))
     
                 # Select the best geometry for further learning rate and batch size optimisation
-                best_geom = sorted_scores[0][:3]
-                best_seed = sorted_scores[0][6]
+                # best_geom = sorted_scores[0][:3]
+                # best_seed = sorted_scores[0][6]
+                best_geom = scores[sort_ind[0], :3]
+                best_weight = scores[sort_ind[0], 6]
                 print("The best untrained RMSE is:")
-                print(sorted_scores[0][5])
-                print("Which is achieved using the weight of {}".format(best_seed))
-                print("\nThe best selected geometry is:\n\tLSTM units: {}\n\tDense units: {}\n\tEmbedding {}".\
-                      format(best_geom[0], best_geom[1], best_geom[2]))
+                # print(sorted_scores[0][5])
+                print(scores[sort_ind[0], 5])
+                print("Which is achieved using the seed of {}".format(best_seed))
                 best_arch = best_geom.tolist()
             else:
                 best_arch = [lstmunits_ref, denseunits_ref, embedding_ref, batch_size_ref, alpha_ref]
                 
-            print("\nThe architecture for this datatset is:\n\tLSTM units: {}\n\tDense units: {}\n\tEmbedding dimensions {}".\
+            print("\nThe best selected geometry is:\n\tLSTM units: {}\n\tDense units: {}\n\tEmbedding dimensions {}\n".\
                  format(int(best_arch[0]), int(best_arch[1]), int(best_arch[2])))
             
             print("***Training the best model.***\n")
@@ -315,10 +323,13 @@ def Main(data,
             y_true['test'] = scaler.inverse_transform(y_test).ravel()
             
             for run in range(n_runs):
-                print("*** Run #{} ***".format(run+1))
+                print("*** Run #{} ***".format(run))
+                print(time.strftime("%m/%d/%Y %H:%M:%S", time.localtime()))
                 # Make the directory for the current run
-                save_dir_run = save_dir+'fold_'+str(ifold)+'/run_'+str(run+1)+'/'
-                os.makedirs(save_dir_run, exist_ok=True)
+                save_dir_run = save_dir+'fold_{}/run_{}/'.format(ifold, run)
+                if not os.path.exists(save_dir_run):
+                    os.makedirs(save_dir_run)
+              
                 # Train the model and predict
                 K.clear_session()  
                 # Define the multi-gpus model if necessary
@@ -327,7 +338,7 @@ def Main(data,
         
                         model_train = model.LSTMAttModel.create(inputtokens = max_length+1, 
                                                                 vocabsize = vocab_size,
-                                                                weight=best_seed,
+                                                                seed=best_seed,
                                                                 lstmunits= int(best_arch[0]), 
                                                                 denseunits = int(best_arch[1]), 
                                                                 embedding = int(best_arch[2]))
@@ -335,7 +346,7 @@ def Main(data,
                         with tf.device('/cpu'):
                             model_train = model.LSTMAttModel.create(inputtokens = max_length+1, 
                                                                     vocabsize = vocab_size,
-                                                                    weight=best_seed,
+                                                                    seed=best_seed,
                                                                     lstmunits= int(best_arch[0]), 
                                                                     denseunits = int(best_arch[1]), 
                                                                     embedding = int(best_arch[2]))
@@ -348,13 +359,13 @@ def Main(data,
         
                     model_train = model.LSTMAttModel.create(inputtokens = max_length+1, 
                                                             vocabsize = vocab_size,
-                                                            weight=best_seed,
+                                                            seed=best_seed,
                                                             lstmunits= int(best_arch[0]), 
                                                             denseunits = int(best_arch[1]), 
                                                             embedding = int(best_arch[2]))
         
-                    print("Best model summary:\n")
-                    print(model_train.summary())
+                    #print("Best model summary:\n")
+                    #print(model_train.summary())
                     print("\n")
                     multi_model = model_train
         
@@ -362,14 +373,16 @@ def Main(data,
                 # Read more on it in the paper from Google Brain
                 # "Don't decay the learning rate, increase the batch size" by S.Smith, Q.Le
                 # https://arxiv.org/abs/1711.00489
-                learning_rate = math.pow(10,-3)
-                batch_size_max = np.ceil(len(x_train_enum)*learning_rate)
+                batch_size_max = len(x_train_enum)/100
+                learning_rate = batch_size_max/9/len(x_train_enum)
                 batch_size_schedule = [int(np.ceil(batch_size_max/9)), int(np.ceil(batch_size_max/3)), int(np.ceil(batch_size_max))]
+                # learning_rate_schedule = [bs/len(x_train_enum) for bs in batch_size_schedule]
                 n_epochs_schedule = [int(n_epochs/3), int(n_epochs/3), n_epochs - 2*int(n_epochs/3)]
                 custom_adam = Adam(lr=learning_rate)
+
                 # Compile the model
                 multi_model.compile(loss='mse', optimizer=custom_adam, metrics=[metrics.mae,metrics.mse])
-                
+
                 # Checkpoint, Early stopping and callbacks definition
                 filepath=save_dir_run+data_name+'_model.best_fold_'+str(ifold)+'_run_'+str(run)+'.hdf5'
         
@@ -384,7 +397,7 @@ def Main(data,
                                                                     best=best_val,
                                                                     ignore_first_epochs=ignore_first_epochs)
                     callbacks_list = [ignorebeginning] 
-                    print("Schedule step number {0}\nNumber of epochs: {1}, batch size: {2}".format(i+1, n_epochs_part, batch_size))
+                    print("Schedule step number {0}\nNumber of epochs: {1}, batch size: {2}, learning rate: {3}".format(i+1, n_epochs_part, batch_size, learning_rate))
                     history = multi_model.fit_generator(generator = DataSequence(x_train_enum_tokens,
                                                                                  vocab = tokens, 
                                                                                  max_length = max_length, 
@@ -412,12 +425,13 @@ def Main(data,
                 plt.ylabel('Loss')
                 plt.xlabel('Epoch')
                 plt.legend(['Train', 'Validation'], loc='upper right')
-                plt.savefig(save_dir_run+'History_fit_'+data_name+'_model_fold_'+str(ifold)+'_run_'+str(run+1)+'.png', bbox_inches='tight')
+                plt.savefig(save_dir_run+'History_fit_'+data_name+'_model_fold_'+str(ifold)+'_run_'+str(run)+'.png', bbox_inches='tight')
                 plt.close()
-    
-                print("***Predictions from the best model.***\n")
+
                 model_train.load_weights(filepath)
-                #model_train.compile(loss="mse", optimizer='adam', metrics=[metrics.mae,metrics.mse])
+
+                # model_train = load_model(filepath,
+                #                    custom_objects={'AttentionM': model.AttentionM(seed=5)})
         
                 # predict and compare for the training, validation and test sets
                 x_train_enum_tokens_tointvec = token.int_vec_encode(tokenized_smiles_list = x_train_enum_tokens, 
@@ -433,6 +447,7 @@ def Main(data,
                 y_pred_train = model_train.predict(x_train_enum_tokens_tointvec)
                 y_pred_valid = model_train.predict(x_valid_enum_tokens_tointvec)
                 y_pred_test = model_train.predict(x_test_enum_tokens_tointvec)
+
         
                 # compute a mean per set of augmented SMILES
                 y_pred_train_mean, _ = utils.mean_median_result(x_train_enum_card, y_pred_train)
@@ -447,10 +462,9 @@ def Main(data,
                 prediction_train_bag[:,run] = y_preds['train']
                 prediction_valid_bag[:,run] = y_preds['valid']
                 prediction_test_bag[:,run] = y_preds['test']
-                
-                final_prediction[test_idx, run] = scaler.inverse_transform(y_pred_test_mean.reshape(-1,1)).ravel()
-
-                
+                run_name = "run_"+str(run)
+                output_data.loc[test_idx, run_name] = y_preds['test']
+                output_data.to_csv(save_dir+'/Predictions.csv', index=False)
                 # Plot individual plots per run for the internal tests
                 # Setting plot limits
                 y_true_min = min(np.min(y_true['train']), np.min(y_true['valid']), np.min(y_true['test']))
@@ -546,7 +560,14 @@ def Main(data,
                 # RMSE
                 rmse = np.sqrt(mean_squared_error(y_true[name], y_preds_mean[name]))
                 # Setup the precision of the displayed error to print it cleanly
-                precision_rmse = (np.abs(np.floor(np.log10(rmse)))+3)/10
+                if np.log10(rmse)>0:
+                    if np.log10(rmse)<prec-1:
+                        precision_rmse = 1+(prec-1-np.floor(np.log10(rmse)))/10
+                    else:
+                        precision_rmse = 1.0
+                else:
+                    precision_rmse = (np.abs(np.floor(np.log10(rmse)))+prec-1)/10
+
                 # Error on RMSE when taking into account error on predictions only
                 d_rmse = np.sqrt(np.square(y_true[name]-y_preds_mean[name]).dot(np.square(y_preds_sigma[name]))/N/ssres)
                 # Error on RMSE when taking into account both errors on predictions and true data
@@ -554,11 +575,19 @@ def Main(data,
                 # MAE
                 mae = mean_absolute_error(y_true[name], y_preds_mean[name])
                 # Setup the precision of the displayed error to print it cleanly
-                precision_mae = (np.abs(np.floor(np.log10(mae)))+3)/10
+                if np.log10(mae)>0:
+                    if np.log10(rmse)<prec-1:
+                        precision_mae = 1+(prec-1-np.floor(np.log10(mae)))/10
+                    else:
+                        precision_mae = 1.0
+                else:
+                    precision_mae = (np.abs(np.floor(np.log10(mae)))+prec-1)/10
                 # Error on RMSE when taking into account error on predictions only
                 d_mae = np.sqrt(np.sum(np.square(y_preds_sigma[name])))/N
                 # Error on RMSE when taking into account both errors on predictions and true data
                 d_mae_exp = np.sqrt(np.sum(np.square(y_preds_sigma[name]) + np.square(y_err[name])))/N
+
+
 
                 print("Averaged R^2: {0:0.4f}+-{1:0.4f}({2:0.4f})".format(r2, d_r2, d_r2_exp[0]))
                 print("Averaged RMSE: {0:{3}f}+-{1:{3}f}({2:{3}f})".format(rmse, d_rmse, d_rmse_exp[0], precision_rmse))
@@ -642,8 +671,8 @@ def Main(data,
             print("----------------------------------------------------")  
             ifold += 1
     if not folds_of_interest:
-        final_prediction_mean = np.mean(final_prediction, axis = 1)
-        final_prediction_sigma = np.std(final_prediction, axis = 1)
+        final_prediction_mean = output_data.loc[:, output_data.columns.str.startswith('run_')].mean(axis = 1)
+        final_prediction_sigma = output_data.loc[:, output_data.columns.str.startswith('run_')].std(axis = 1)
         data_values = np.array(data.iloc[:,1])
         data_error = np.array(data.iloc[:,2])
         
@@ -666,7 +695,7 @@ def Main(data,
         d_mae_final = np.sqrt(np.sum(np.square(final_prediction_sigma)))/N_final
 
         print("Final averaged R^2:")
-        print("{0:0.4f}+-{1:0.4f}".format(r2_final, d_r2_final, d_r2_final_exp))
+        print("{0:0.4f}+-{1:0.4f}".format(r2_final, d_r2_final))
         print("Final averaged RMSE:")
         print("{0:{2}f}+-{1:{2}f}".format(rmse_final, d_rmse_final, precision_rmse))
         print("Final averaged MAE:")
@@ -679,8 +708,8 @@ def Main(data,
         # Setting plot limits
         y_true_min = np.min(data_values)
         y_true_max = np.max(data_values)
-        y_pred_min = np.min(final_prediction)
-        y_pred_max = np.max(final_prediction)
+        y_pred_min = np.min(final_prediction_mean)
+        y_pred_max = np.max(final_prediction_mean)
         # Expanding slightly the canvas around the data points (by 10%)
         axmin = y_true_min-0.1*(y_true_max-y_true_min)
         axmax = y_true_max+0.1*(y_true_max-y_true_min)
@@ -761,6 +790,5 @@ class DataSequence(Sequence):
         #batch_x = self.batch[idx * self.batch_size:(idx + 1) * self.batch_size]
 
         batch_y = self.props_set[idx * self.batch_size:(idx + 1) * self.batch_size]
-
         return np.array(batch_x), np.array(batch_y)
 ##

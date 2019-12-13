@@ -35,8 +35,8 @@ class AttentionM(Layer):
         enc = LSTM(EMBED_SIZE, return_sequences=True)(...)
         att = AttentionM()(enc)
     """    
-    def __init__(self, weight, return_probabilities = False, **kwargs):
-        self.weight = weight
+    def __init__(self, seed, return_probabilities = False, **kwargs):
+        self.seed = seed
         self.return_probabilities = return_probabilities
         super(AttentionM, self).__init__(**kwargs)
 
@@ -46,7 +46,7 @@ class AttentionM(Layer):
         # b: (MAX_TIMESTEPS,)
         self.W = self.add_weight(name="W_{:s}".format(self.name), 
                                  shape=(input_shape[-1], 1),
-                                 initializer=initializers.glorot_normal(seed=self.weight))
+                                 initializer=initializers.glorot_normal(seed=self.seed))
         self.b = self.add_weight(name="b_{:s}".format(self.name),
                                  shape=(input_shape[1], 1),
                                  initializer="zeros")
@@ -82,7 +82,9 @@ class AttentionM(Layer):
 
 
     def get_config(self):
-        return super(AttentionM, self).get_config()
+        base_config = super(AttentionM, self).get_config()
+        base_config['seed'] = self.seed
+        return base_config
 ##
     
 ## Neural architecture of the SMILES-X
@@ -97,7 +99,7 @@ class LSTMAttModel():
     # Returns: 
     #         a model in the Keras API format
     @staticmethod
-    def create(inputtokens, vocabsize, weight, lstmunits=16, denseunits=16, embedding=32, return_proba = False):
+    def create(inputtokens, vocabsize, seed, lstmunits=16, denseunits=16, embedding=32, return_proba = False):
 
         input_ = Input(shape=(inputtokens,), dtype='int32')
 
@@ -105,135 +107,23 @@ class LSTMAttModel():
         net = Embedding(input_dim=vocabsize, 
                         output_dim=embedding, 
                         input_length=inputtokens,
-                        embeddings_initializer=initializers.glorot_normal(seed=weight))(input_)
+                        embeddings_initializer=initializers.glorot_normal(seed=seed))(input_)
 
         # Bidirectional LSTM layer
         net = Bidirectional(CuDNNLSTM(lstmunits, 
                             return_sequences=True, 
-                            kernel_initializer=initializers.glorot_normal(seed=weight),
-                            recurrent_initializer=initializers.glorot_normal(seed=weight)))(net)
-        net = TimeDistributed(Dense(denseunits, kernel_initializer=initializers.glorot_normal(seed=weight)))(net)
-        net = AttentionMNoTrain(weight=weight, return_probabilities=return_proba)(net)
+                            kernel_initializer=initializers.glorot_normal(seed=seed),
+                            recurrent_initializer=initializers.glorot_normal(seed=seed)))(net)
+        net = TimeDistributed(Dense(denseunits, kernel_initializer=initializers.glorot_normal(seed=seed)))(net)
+        net = AttentionM(seed=seed, return_probabilities=return_proba)(net)
 
         # Output layer
-        net = Dense(1, activation="linear", kernel_initializer=initializers.glorot_normal(seed=weight))(net)
+        net = Dense(1, activation="linear", kernel_initializer=initializers.glorot_normal(seed=seed))(net)
         
         model = Model(inputs=input_, outputs=net)
 
 
         return model
-##
-class AttentionMNoTrain(Layer):
-    """
-    Keras layer to compute an attention vector on an incoming matrix.
-    # Input
-        enc - 3D Tensor of shape (BATCH_SIZE, MAX_TIMESTEPS, EMBED_SIZE)
-        weight - the value for the weights initialisation
-    # Output
-        2D Tensor of shape (BATCH_SIZE, EMBED_SIZE)
-    # Usage
-        enc = LSTM(EMBED_SIZE, return_sequences=True)(...)
-        att = AttentionM()(enc)
-    """    
-    def __init__(self, weight, return_probabilities = False, **kwargs,):
-        self.weight = weight
-        self.return_probabilities = return_probabilities
-        super(AttentionMNoTrain, self).__init__(**kwargs)
-
-    def build(self, input_shape):
-        # W: (EMBED_SIZE, 1)
-        # b: (MAX_TIMESTEPS,)
-        self.W = self.add_weight(name="W_{:s}".format(self.name), 
-                                 shape=(input_shape[-1], 1),
-                                 # initializer=initializers.constant(value=self.weight))
-                                 # initializer=initializers.random_normal(mean=self.weight, stddev=0.05, seed=123))
-                                 initializer=initializers.glorot_normal(seed=self.weight))
-        self.b = self.add_weight(name="b_{:s}".format(self.name),
-                                 shape=(input_shape[1], 1),
-                                 initializer="zeros")
-        super(AttentionMNoTrain, self).build(input_shape)
-
-
-    def call(self, x, mask=None):
-        # input: (BATCH_SIZE, MAX_TIMESTEPS, EMBED_SIZE)
-        # et: (BATCH_SIZE, MAX_TIMESTEPS)
-        et = K.squeeze(K.tanh(K.dot(x, self.W) + self.b), axis=-1)
-        # at: (BATCH_SIZE, MAX_TIMESTEPS)
-        at = K.softmax(et)
-        if mask is not None:
-            at *= K.cast(mask, K.floatx())
-        # atx: (BATCH_SIZE, MAX_TIMESTEPS, 1)
-        atx = K.expand_dims(at, axis=-1)
-        # ot: (BATCH_SIZE, MAX_TIMESTEPS, EMBED_SIZE)
-        ot = x * atx
-        # output: (BATCH_SIZE, EMBED_SIZE)
-        if self.return_probabilities: 
-            return atx # for visualization of the attention weights
-        else:
-            return K.sum(ot, axis=1) # for prediction
-
-    
-    def compute_mask(self, input, input_mask=None):
-        # do not pass the mask to the next layers
-        return None
-    
-    
-    def compute_output_shape(self, input_shape):
-        return (input_shape[0], input_shape[-1])
-
-
-    def get_config(self):
-        return super(AttentionMNoTrain, self).get_config()
-##
-
-## Neural architecture of the SMILES-X for the trainless geometry optimization step
-class LSTMAttModelNoTrain():
-    # Initialization
-    # inputtokens: maximum length for the encoded and tokenized SMILES
-    # vocabsize: size of the vocabulary
-    # lstmunits: number of LSTM units
-    # denseunits: number of dense units
-    # embedding: dimension of the embedded vectors
-    # return_proba: return the attention vector (True) or not (False) (Default: False)
-    # Returns: 
-    #         a model in the Keras API format
-    @staticmethod
-
-    def create(inputtokens, vocabsize, weight, lstmunits=16, denseunits=16, embedding=32, return_proba = False):
-
-        input_ = Input(shape=(inputtokens,), dtype='int32')
-
-        # Embedding layer
-        net = Embedding(input_dim=vocabsize, 
-                        output_dim=embedding, 
-                        input_length=inputtokens,
-                        # embeddings_initializer=initializers.constant(value=weight))(input_)
-                        # embeddings_initializer=initializers.random_normal(mean=weight, stddev=0.05, seed=123))(input_)
-                        embeddings_initializer=initializers.glorot_normal(seed=weight))(input_)
-
-        # Bidirectional LSTM layer
-        net = Bidirectional(CuDNNLSTM(lstmunits, 
-                            return_sequences=True, 
-                            # kernel_initializer=initializers.constant(value=weight),
-                            # recurrent_initializer=initializers.constant(value=weight)))(net)
-                            # kernel_initializer=initializers.random_normal(mean=weight, stddev=0.05, seed=123),
-                            # recurrent_initializer=initializers.random_normal(mean=weight, stddev=0.05, seed=123)))(net)
-                            kernel_initializer=initializers.glorot_normal(seed=weight),
-                            recurrent_initializer=initializers.glorot_normal(seed=weight)))(net)
-        # net = TimeDistributed(Dense(denseunits, kernel_initializer=initializers.constant(value=weight)))(net)
-        # net = TimeDistributed(Dense(denseunits, kernel_initializer=initializers.random_normal(mean=weight, stddev=0.05, seed=123)))(net)
-        net = TimeDistributed(Dense(denseunits, kernel_initializer=initializers.glorot_normal(seed=weight)))(net)
-        net = AttentionMNoTrain(weight=weight, return_probabilities=return_proba)(net)
-
-        # Output layer
-        # net = Dense(1, activation="linear", kernel_initializer=initializers.constant(value=weight))(net)
-        # net = Dense(1, activation="linear", kernel_initializer=initializers.random_normal(mean=weight, stddev=0.05, seed=123))(net)
-        net = Dense(1, activation="linear", kernel_initializer=initializers.glorot_normal(seed=weight))(net)
-        
-        model = Model(inputs=input_, outputs=net)
-
-        return model
-##
 
 ## Function to fit a model on a multi-GPU machine
 class ModelMGPU(Model):
@@ -277,8 +167,8 @@ class IgnoreBeginningSaveBest(Callback):
                 self.ignore_first_epochs = ignore_first_epochs
                 self.best = best
 
-                # best_seeds to store the weights at which the minimum loss occurs.
-                self.best_seeds = None
+                # best_weights to store the weights at which the minimum loss occurs.
+                self.best_weights = None
 
             def on_train_begin(self, logs=None):
                 # The epoch the training stops at.
@@ -286,21 +176,26 @@ class IgnoreBeginningSaveBest(Callback):
 
             def on_epoch_end(self, epoch, logs=None):
                 current = logs.get('val_loss')
+                if epoch%10==0:
+                    print("Finished the {}-th epoch".format(epoch))
                 if epoch>self.ignore_first_epochs:
                     if np.less(current, self.best):
-                        print("Current epochs is better the previous best loss")
-                        print("Validation loss is:")
-                        print(current)
                         self.best = current
                         # Record the best weights if the current result is better (less).
-                        self.best_seeds = self.model.get_weights()
+                        self.best_weights = self.model.get_weights()
                         self.best_epoch = epoch
+                        
                     
             def on_train_end(self, logs=None):
                 print("The model will be based on the epoch #{}".format(self.best_epoch))
                 print('Restoring model weights from the end of the best epoch.')
-                if self.best_seeds is not None:
-                    self.model.set_weights(self.best_seeds)
-                # Save the final model
-                self.model.save(self.filepath)
+                if self.best_weights is not None:
+                    self.model.set_weights(self.best_weights)
+                    # Save the final model
+                    self.model.save(self.filepath)
+                    print("The best achieved validation loss is {}".format(self.best))
+                else:
+                    print("The best achieved validation loss is {}".format(self.best))
+                
+                
 ##

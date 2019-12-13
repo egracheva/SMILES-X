@@ -3,6 +3,8 @@ import ast
 
 from SMILESX import utils, augm
 from keras import backend as K
+from sklearn.model_selection import KFold
+
 # import tensorflow as tf
 
 # #from keras.backend.tensorflow_backend import set_session
@@ -116,7 +118,7 @@ def get_inttotoken(tokens):
 def TokensFinder(data, 
                  data_name, 
                  data_units = '',
-                 k_fold_number = 8,
+                 k_fold_number = 10,
                  k_fold_index = 0,
                  augmentation = False, 
                  token_tofind = '', 
@@ -124,68 +126,72 @@ def TokensFinder(data,
     
     print("***SMILES_X token's finder starts...***\n\n")
     np.random.seed(seed=123)
-    seed_list = np.random.randint(int(1e6), size = k_fold_number).tolist()
     
-    print("******")
-    print("***Fold #{} initiated...***".format(k_fold_index))
-    print("******")
+    # Train/validation/test data splitting - 80/10/10 % at random with diff. seeds for k_fold_number times
+    kfold = KFold(k_fold_number, shuffle = True)
+    ifold = 0
+    for train_val_idx, test_idx in kfold.split(data.smiles):
+        if ifold == k_fold_index:
+            print("******")
+            print("***Fold #{} initiated...***".format(k_fold_index))
+            print("******")
 
-    print("***Sampling and splitting of the dataset.***\n")
-    # Reproducing the data split of the requested fold (k_fold_index)
-    x_train, x_valid, x_test, y_train, y_valid, y_test, scaler = \
-    utils.random_split(smiles_input=data.smiles, 
-                       prop_input=np.array(data.iloc[:,1]), 
-                       random_state=seed_list[k_fold_index], 
-                       scaling = True)
+            print("***Sampling and splitting of the dataset.***\n")
+            # Reproducing the data split of the requested fold (k_fold_index)
+            x_train, x_valid, x_test, y_train, y_valid, y_test, y_err, scaler = \
+            utils.random_split(smiles_input=data.smiles,
+                               prop_input=np.array(data.iloc[:,1]),
+                               err_input=np.array(data.iloc[:,2]),
+                               train_val_idx=train_val_idx,
+                               test_idx=test_idx,                                                         
+                               scaling = True)
     
-    # data augmentation or not
-    if augmentation == True:
-        print("***Data augmentation.***\n")
-        canonical = False
-        rotation = True
-    else:
-        print("***No data augmentation has been required.***\n")
-        canonical = True
-        rotation = False
+            # data augmentation or not
+            if augmentation == True:
+                print("***Data augmentation.***\n")
+                canonical = False
+                rotation = True
+            else:
+                print("***No data augmentation has been required.***\n")
+                canonical = True
+                rotation = False
 
-    x_train_enum, x_train_enum_card, y_train_enum = \
-    augm.Augmentation(x_train, y_train, canon=canonical, rotate=rotation)
+            x_train_enum, x_train_enum_card, y_train_enum = \
+            augm.Augmentation(x_train, y_train, canon=canonical, rotate=rotation)
 
-    x_valid_enum, x_valid_enum_card, y_valid_enum = \
-    augm.Augmentation(x_valid, y_valid, canon=canonical, rotate=rotation)
+            x_valid_enum, x_valid_enum_card, y_valid_enum = \
+            augm.Augmentation(x_valid, y_valid, canon=canonical, rotate=rotation)
 
-    x_test_enum, x_test_enum_card, y_test_enum = \
-    augm.Augmentation(x_test, y_test, canon=canonical, rotate=rotation)
+            x_test_enum, x_test_enum_card, y_test_enum = \
+            augm.Augmentation(x_test, y_test, canon=canonical, rotate=rotation)
 
-    print("Enumerated SMILES:\n\tTraining set: {}\n\tValidation set: {}\n\tTest set: {}\n".\
-    format(x_train_enum.shape[0], x_valid_enum.shape[0], x_test_enum.shape[0]))
+            print("Enumerated SMILES:\n\tTraining set: {}\n\tValidation set: {}\n\tTest set: {}\n".\
+            format(x_train_enum.shape[0], x_valid_enum.shape[0], x_test_enum.shape[0]))
 
-    print("***Tokenization of SMILES.***\n")
-    # Tokenize SMILES per dataset
-    x_train_enum_tokens = get_tokens(x_train_enum)
-    x_valid_enum_tokens = get_tokens(x_valid_enum)
-    x_test_enum_tokens = get_tokens(x_test_enum)
+            print("***Tokenization of SMILES.***\n")
+            # Tokenize SMILES per dataset
+            x_train_enum_tokens = get_tokens(x_train_enum)
+            x_valid_enum_tokens = get_tokens(x_valid_enum)
+            x_test_enum_tokens = get_tokens(x_test_enum)
 
-    print("Examples of tokenized SMILES from a training set:\n{}\n".\
-    format(x_train_enum_tokens[:5]))
+            print("Examples of tokenized SMILES from a training set:\n{}\n".\
+            format(x_train_enum_tokens[:3]))
 
-    # Vocabulary size computation
-    all_smiles_tokens = x_train_enum_tokens+x_valid_enum_tokens+x_test_enum_tokens
-    tokens = extract_vocab(all_smiles_tokens)
-    vocab_size = len(tokens)
-
-    train_unique_tokens = list(extract_vocab(x_train_enum_tokens))
-    
-    # Token finder
-    print("The finder is processing the search...")
-    n_found = 0
-    for ismiles in x_train_enum_tokens:
-        if token_tofind in ismiles:
-            n_found += 1
-            if verbose == 1: 
-                print(''.join(ismiles))
+            train_unique_tokens = list(extract_vocab(x_train_enum_tokens))
             
-    print("\n{} SMILES found with {} token in the training set.".format(n_found, token_tofind))
+            # Token finder
+            print("The finder is processing the search...")
+            n_found = 0
+            for ismiles in x_train_enum_tokens:
+                if token_tofind in ismiles:
+                    n_found += 1
+                    if verbose == 1: 
+                        print(''.join(ismiles))
+                    
+            print("\n{} SMILES found with {} token in the training set.".format(n_found, token_tofind))
+            ifold += 1
+        else:
+            ifold += 1
 ##
 
 ## Save the vocabulary for further use of a model
