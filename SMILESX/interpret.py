@@ -75,7 +75,7 @@ def Interpretation(data,
     if os.path.exists(input_dir+data_name+'_Vocabulary.txt'):
         tokens = token.get_vocab(input_dir+data_name+'_Vocabulary.txt')
     else:
-        "Vocabulary file does not exist. Are you sure you have already trained the model?"
+        print("Vocabulary file does not exist. Are you sure you have already trained the model?")
     vocab_size = len(tokens)
 
     # Add 'pad', 'unk' tokens to the existing list
@@ -236,13 +236,13 @@ def Interpretation(data,
                 y_test_tmp = smiles_toviz_y_enum[ienumcard, 0]
                 y_pred_test_tmp_scaled = scaler.inverse_transform(y_pred_test_tmp.reshape(1, -1))[0][0]
                 # Getting automatic precision computed
-                if np.log10(y_pred_test_tmp_scaled)>0:
-                    if np.log10(y_pred_test_tmp_scaled)<prec-1:
-                        precision = 1+(prec-1-np.floor(np.log10(y_pred_test_tmp_scaled)))/10
+                if np.log10(np.abs((y_pred_test_tmp_scaled)))>0:
+                    if np.log10(np.abs((y_pred_test_tmp_scaled)))<prec-1:
+                        precision = 1+(prec-1-np.floor(np.log10(np.abs((y_pred_test_tmp_scaled)))))/10
                     else:
                         precision = 1.0
                 else:
-                    precision = (np.abs(np.floor(np.log10(y_pred_test_tmp_scaled)))+prec-1)/10
+                    precision = (np.abs(np.floor(np.log10(np.abs((y_pred_test_tmp_scaled)))))+prec-1)/10
 
                 if not np.isnan(y_test_tmp):
                     print("True value: {0:{2}f} Predicted: {1:{2}f}".format(y_test_tmp,
