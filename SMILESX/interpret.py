@@ -112,6 +112,7 @@ def Interpretation(data,
             
             smiles_toviz_x = []
             smiles_toviz_y = []
+        
             for smiles_toviz in smiles_list_toviz:
                 mol_toviz = Chem.MolFromSmiles(smiles_toviz)
                 if mol_toviz != None:
@@ -126,8 +127,8 @@ def Interpretation(data,
                     print("The smiles_toviz is incorrect and cannot be canonicalized by RDKit.")
                     return
 
-            smiles_toviz_x = np.array(smiles_toviz_x)
-            smiles_toviz_y = np.array(smiles_toviz_y)
+            smiles_toviz_x = np.array(smiles_toviz_x).ravel()
+            smiles_toviz_y = np.array(smiles_toviz_y).ravel()
 
             # data augmentation or not
             if augmentation == True:
@@ -233,7 +234,7 @@ def Interpretation(data,
                 plt.savefig('{}Interpretation_1D_{}_fold_{}_run_{}_mol_{}_{}.png'.format(save_dir, data_name, k_fold_index, run_index, mols_id, tag), bbox_inches='tight')
             
                 y_pred_test_tmp = model_topredict.predict(smiles_toviz_x_enum_tokens_tointvec[ienumcard].reshape(1,-1))[0,0]
-                y_test_tmp = smiles_toviz_y_enum[ienumcard, 0]
+                y_test_tmp = smiles_toviz_y_enum[ienumcard]
                 y_pred_test_tmp_scaled = scaler.inverse_transform(y_pred_test_tmp.reshape(1, -1))[0][0]
                 # Getting automatic precision computed
                 if np.log10(np.abs((y_pred_test_tmp_scaled)))>0:
