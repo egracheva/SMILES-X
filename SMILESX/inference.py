@@ -8,6 +8,7 @@ from keras.models import load_model
 from keras import backend as K
 from keras import metrics
 import tensorflow as tf
+from sklearn.model_selection import KFold
 
 from SMILESX import utils, model, token, augm
 
@@ -27,7 +28,8 @@ K.set_session(sess)  # set this TensorFlow session as the default session for Ke
 # outdir: directory for outputs (plots + .txt files) -> 'Inference/'+'{}/{}/'.format(data_name,p_dir_temp) is then created
 # returns:
 #         Array of SMILES with their inferred property (mean, standard deviation) from models ensembling
-def Inference(data_name, 
+def Inference(data,
+              data_name, 
               smiles_list = ['CC','CCC','C=O'], 
               data_units = '',
               k_fold_number = 10,
@@ -103,38 +105,55 @@ def Inference(data_name,
     # models ensembling
     smiles_y_pred_mean_array = np.empty(shape=(0,len(smiles_checked)), dtype='float')
 
+
     # If there is a list of folds of interest defined by the user
     if folds_of_interest:
         folds = folds_of_interest
     # If there is no defined list of the folds of interest, run for all folds
     else:
         folds = [n for n in range(0, k_fold_number)]
+    ifold = 0
+    np.random.seed(seed=123)
+    kfold = KFold(k_fold_number, shuffle = True)
+    for train_val_idx, test_idx in kfold.split(data.smiles):
+        if ifold in folds:
+            for run in range(n_runs):
+                input_dir_run = input_dir +'fold_{}/run_{}/'.format(ifold, run)
+                _, _, _, _, _, _, _, scaler = utils.random_split(smiles_input=data.smiles,
+                                                                 prop_input=np.array(data.iloc[:,1]),
+                                                                 err_input=np.array(data.iloc[:,2]),
+                                                                 train_val_idx=train_val_idx,
+                                                                 test_idx=test_idx,                                                         
+                                                                 scaling = True)
+                # Best architecture to visualize from
+                model_train = load_model(input_dir_run+data_name+'_model.best_fold_'+str(ifold)+'_run_'+str(run)+'.hdf5', 
+                                         custom_objects={'AttentionM': model.AttentionM(seed=5)})
 
-    for ifold in folds:
-        for run in range(n_runs):
-            input_dir_run = input_dir +'fold_{}/run_{}/'.format(ifold, run)
-            # Best architecture to visualize from
-            model_train = load_model(input_dir_run+data_name+'_model.best_fold_'+str(ifold)+'_run_'+str(run)+'.hdf5', 
-                                     custom_objects={'AttentionM': model.AttentionM(seed=5)})
+                if ifold == folds[0]:
+                    if run == 0:
+                        # Maximum of length of SMILES to process
+                        max_length = model_train.layers[0].output_shape[-1]
+                        print("Full vocabulary: {}\nOf size: {}\n".format(tokens, vocab_size))
+                        print("Maximum length of tokenized SMILES: {} tokens\n".format(max_length))
 
-            if ifold == folds[0]:
-                if run == 0:
-                    # Maximum of length of SMILES to process
-                    max_length = model_train.layers[0].output_shape[-1]
-                    print("Full vocabulary: {}\nOf size: {}\n".format(tokens, vocab_size))
-                    print("Maximum length of tokenized SMILES: {} tokens\n".format(max_length))
+                # predict and compare for the training, validation and test sets
+                smiles_x_enum_tokens_tointvec = token.int_vec_encode(tokenized_smiles_list = smiles_x_enum_tokens, 
+                                                                     max_length = max_length, 
+                                                                     vocab = tokens)
 
-            # predict and compare for the training, validation and test sets
-            smiles_x_enum_tokens_tointvec = token.int_vec_encode(tokenized_smiles_list = smiles_x_enum_tokens, 
-                                                                 max_length = max_length, 
-                                                                 vocab = tokens)
+                smiles_y_pred = model_train.predict(smiles_x_enum_tokens_tointvec)
+                smiles_y_pred_unscaled = scaler.inverse_transform(smiles_y_pred)
 
-            smiles_y_pred = model_train.predict(smiles_x_enum_tokens_tointvec)
-
-            # compute a mean per set of augmented SMILES
-            smiles_y_pred_mean, _ = utils.mean_median_result(smiles_x_enum_card, smiles_y_pred)
-            
-            smiles_y_pred_mean_array = np.append(smiles_y_pred_mean_array, smiles_y_pred_mean.reshape(1,-1), axis = 0)
+                # compute a mean per set of augmented SMILES
+                smiles_y_pred_mean, _ = utils.mean_median_result(smiles_x_enum_card, smiles_y_pred_unscaled)                
+                smiles_y_pred_mean_array = np.append(smiles_y_pred_mean_array, smiles_y_pred_mean.reshape(1,-1), axis = 0)
+            print("Finished the " + str(ifold) + " fold")
+            print("----------------------------------------------------")
+            ifold += 1
+        else:
+            print("Skipped the " + str(ifold) + " fold")
+            print("----------------------------------------------------")  
+            ifold += 1
 
     smiles_y_pred_mean_ensemble = np.mean(smiles_y_pred_mean_array, axis = 0)
     smiles_y_pred_sd_ensemble = np.std(smiles_y_pred_mean_array, axis = 0)
