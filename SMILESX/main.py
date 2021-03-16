@@ -79,7 +79,7 @@ def Main(data,
          data_name, 
          data_units,
          geom_bounds,
-         seed_range,
+         seed_range = 30,
          n_runs = 5,
          k_fold_number = 10,
          folds_of_interest = False,
@@ -223,7 +223,7 @@ def Main(data,
                     x_geom_enum_tokens_tointvec = np.concatenate((x_train_enum_tokens_tointvec, x_valid_enum_tokens_tointvec), axis = 0)
                     y_geom_enum                 = np.concatenate((y_train_enum, y_valid_enum), axis = 0)
                     pred_scores = []
-                    for i, seed in enumerate(seed_range):
+                    for seed in range(seed_range)
                         K.clear_session()
     
                         if n_gpus > 1:
@@ -263,7 +263,7 @@ def Main(data,
                     mean_score = np.mean(pred_scores)
                     best_score = np.min(pred_scores)
                     sigma_score = np.std(pred_scores)
-                    best_seed = seed_range[np.argmin(pred_scores)]
+                    best_seed = np.argmin(pred_scores)
                     n_nodes = model_geom.count_params()
                     return [mean_score, sigma_score, best_score, best_seed, n_nodes]
     
