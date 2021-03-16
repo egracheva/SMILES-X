@@ -35,14 +35,9 @@ from sklearn.model_selection import KFold
 from SMILESX import utils, token, augm, model
 import pygmo as pg
 
-
 np.set_printoptions(precision=3)
-# 
-# from sklearn.manifold import TSNE
-# from keras.utils import np_utils
 
 ##
-#from keras.backend.tensorflow_backend import set_session
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True  # dynamically grow the memory used on the GPU
 config.log_device_placement = True  # to log device placement (on which device the operation ran)
@@ -52,27 +47,25 @@ K.set_session(sess)  # set this TensorFlow session as the default session for Ke
 ## SMILESX main pipeline
 # data: provided data (pandas DataFrame of: (SMILES, property))
 # data_name: dataset's name
-# bayopt_bounds: bounds contraining the Bayesian search of neural architectures
 # data_units: property's SI units
-# k_fold_number: number of k-folds used for cross-validation (Default: 8)
+# geom_bounds: bounds contraining the geometry search of neural architectures
+# k_fold_number: number of k-folds used for cross-validation (Default: 10)
+# folds_of_interest: indices of the folds to be run (Default: False)
 # augmentation: SMILES augmentation (Default: False)
 # outdir: directory for outputs (plots + .txt files) -> 'Main/'+'{}/{}/'.format(data_name,p_dir_temp) is then created
-# bayopt_n_epochs: number of epochs for training a neural architecture during Bayesian architecture search (Default: 10)
-# bayopt_n_rounds: number of architectures to be sampled during Bayesian architecture search (initialization + optimization) (Default: 25)
-# bayopt_it_factor: portion of data to be used during Bayesian architecture search (Default: 1)
-# bayopt_on: Use Bayesian architecture search or not (Default: True)
-# lstmunits_ref: number of LSTM units for the k_fold_index if Bayesian architecture search is off
-# denseunits_ref: number of dense units for the k_fold_index if Bayesian architecture search is off
-# embedding_ref: number of embedding dimensions for the k_fold_index if Bayesian architecture search is off
-# batch_size_ref: batch size for neural architecture training if Bayesian architecture search is off
-# alpha_ref: 10^(-alpha_ref) Adam's learning rate for neural architecture training if Bayesian architecture search is off
-# n_gpus: number of GPUs to be used in parallel (Default: 1)
-# bridge_type: bridge's type to be used by GPUs (e.g. 'NVLink' or 'None') (Default: 'None')
-# patience: number of epochs to respect before stopping a training after minimal validation's error (Default: 25)
+# geomopt_on: whether to perform the architecture search or to use a user-defined geometry (Default: True)
+# geom_choice: whether to choose the best geometry for each fold independently, or select the best overall architecure (Default: 'best_overall')
+# lstmunits_ref: number of LSTM units if the architecture search is off
+# denseunits_ref: number of dense units if the architecture search is off
+# embedding_ref: number of embedding dimensions if the architecture search is off
+# batch_size_ref: starting batch size fixed by the user
+# lr_ref: 10^(-lr_ref) Adam's learning rate fixed by the user
 # n_epochs: maximum of epochs for training (Default: 200)
 # best_seed: the seed for the weights initialization (Default: 0)
-# ignore_first_epochs: number of epochs to ignore during training (Default: 100)
+# ignore_first_epochs: number of epochs to ignore during the training (Default: 100)
 # prec: precision of the displayed values (Default: 4 significant numbers)
+# n_gpus: number of GPUs to be used in parallel (Default: 1)
+# bridge_type: bridge's type to be used by GPUs (e.g. 'NVLink' or 'None') (Default: 'None')
 
 # returns:
 #         Tokens list (Vocabulary) -> *.txt
@@ -99,7 +92,7 @@ def Main(data,
          denseunits_ref = 2,
          embedding_ref = 2,
          batch_size_ref = 64,
-         alpha_ref = 2.8,
+         lr_ref = 2.8,
          best_seed = 0,
          n_epochs = 200,
          ignore_first_epochs = 1,
@@ -286,27 +279,23 @@ def Main(data,
                     pd.DataFrame(scores).to_csv(save_dir+'fold_{}/Scores.csv'.format(ifold), index=False)
 
                 scores = np.array(scores)
-                ## Multistage sorting procedure
-                ## Firstly, sort based on mean score and sigma over seeds
-                points = scores[:, [3, 4]].tolist()
-                sort_ind = pg.sort_population_mo(points)
-                # sorted_scores = sorted(scores, key = lambda x: x[5], reverse = True)
+                metric = scores[:, 4]/scores[:, 3]
+                scores_sorted = scores[metric.argsort()]
+                pd.DataFrame(scores_sorted).to_csv(save_dir+'Scores_fold_{}_SORTED.csv'.format(ifold), index=False)
+    
                 print("Re-ordered scores")
-                # print(pd.DataFrame(sorted_scores[:10]))
-                print(pd.DataFrame(scores[sort_ind[:10]]))
+                print(pd.DataFrame(scores_sorted [:10, :]))
     
                 # Select the best geometry for further learning rate and batch size optimisation
-                # best_geom = sorted_scores[0][:3]
-                # best_seed = sorted_scores[0][6]
-                best_geom = scores[sort_ind[0], :3]
-                best_weight = scores[sort_ind[0], 6]
+                best_geom = scores_sorted [0, :3]
+                best_seed = scores_sorted [0, 6]
                 print("The best untrained RMSE is:")
-                # print(sorted_scores[0][5])
-                print(scores[sort_ind[0], 5])
+                print(scores_sorted [0, 5])
+                
                 print("Which is achieved using the seed of {}".format(best_seed))
-                best_arch = best_geom.tolist()
+                best_geom_list = best_geom.tolist()
             else:
-                best_arch = [lstmunits_ref, denseunits_ref, embedding_ref, batch_size_ref, alpha_ref]
+                best_arch = [lstmunits_ref, denseunits_ref, embedding_ref, batch_size_ref, lr_ref]
                 
             print("\nThe best selected geometry is:\n\tLSTM units: {}\n\tDense units: {}\n\tEmbedding dimensions {}\n".\
                  format(int(best_arch[0]), int(best_arch[1]), int(best_arch[2])))
