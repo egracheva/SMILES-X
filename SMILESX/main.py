@@ -54,7 +54,6 @@ K.set_session(sess)  # set this TensorFlow session as the default session for Ke
 # augmentation: SMILES augmentation (Default: False)
 # outdir: directory for outputs (plots + .txt files) -> 'Main/'+'{}/{}/'.format(data_name,p_dir_temp) is then created
 # geomopt_on: whether to perform the architecture search or to use a user-defined geometry (Default: True)
-# geom_choice: whether to choose the best geometry for each fold independently, or select the best overall architecure (Default: 'best_overall')
 # lstmunits_ref: number of LSTM units if the architecture search is off
 # denseunits_ref: number of dense units if the architecture search is off
 # embedding_ref: number of embedding dimensions if the architecture search is off
@@ -79,6 +78,7 @@ def Main(data,
          data_name, 
          data_units,
          geom_bounds,
+         bayopt_bounds,
          seed_range = 30,
          n_runs = 5,
          k_fold_number = 10,
@@ -86,6 +86,10 @@ def Main(data,
          augmentation = True, 
          outdir = "./data/", 
          geomopt_on = True,
+         bayopt_on = True,
+         bayopt_n_epochs = 10,
+         bayopt_n_rounds = 25, 
+         bayopt_it_factor = 1, 
          n_gpus = 1,
          bridge_type = 'NVLink',
          lstmunits_ref = 2,
@@ -223,7 +227,7 @@ def Main(data,
                     x_geom_enum_tokens_tointvec = np.concatenate((x_train_enum_tokens_tointvec, x_valid_enum_tokens_tointvec), axis = 0)
                     y_geom_enum                 = np.concatenate((y_train_enum, y_valid_enum), axis = 0)
                     pred_scores = []
-                    for seed in range(seed_range)
+                    for seed in range(seed_range):
                         K.clear_session()
     
                         if n_gpus > 1:
@@ -295,11 +299,97 @@ def Main(data,
                 print("Which is achieved using the seed of {}".format(best_seed))
                 best_geom_list = best_geom.tolist()
             else:
-                best_arch = [lstmunits_ref, denseunits_ref, embedding_ref, batch_size_ref, lr_ref]
+                best_geom_list = [lstmunits_ref, denseunits_ref, embedding_ref]
                 
             print("\nThe best selected geometry is:\n\tLSTM units: {}\n\tDense units: {}\n\tEmbedding dimensions {}\n".\
-                 format(int(best_arch[0]), int(best_arch[1]), int(best_arch[2])))
+                 format(int(best_geom_list[0]), int(best_geom_list[1]), int(best_geom_list[2])))
             
+            if bayopt_on:
+                # Operate the bayesian optimization of the neural architecture
+                def create_mod_bayopt(params):
+                    print('Model: {}'.format(params))
+
+                    model_tag = data_name
+
+                    K.clear_session()
+
+                    if n_gpus > 1:
+                        if bridge_type == 'NVLink':
+                            model_opt = model.LSTMAttModel.create(inputtokens = max_length+1, 
+                                                                  vocabsize = vocab_size, 
+                                                                  seed=best_seed,
+                                                                  lstmunits=int(best_geom_list[0]), 
+                                                                  denseunits = int(best_geom_list[1]), 
+                                                                  embedding = int(best_geom_list[2]))
+                        else:
+                            with tf.device('/cpu'): # necessary to multi-GPU scaling
+                                model_opt = model.LSTMAttModel.create(inputtokens = max_length+1, 
+                                                                      vocabsize = vocab_size, 
+                                                                      seed=best_seed,
+                                                                      lstmunits=int(best_geom_list[0]), 
+                                                                      denseunits = int(best_geom_list[1]), 
+                                                                      embedding = int(best_geom_list[2]))
+                                
+                        multi_model = model.ModelMGPU(model_opt, gpus=n_gpus, bridge_type=bridge_type)
+                    else: # single GPU
+                        model_opt = model.LSTMAttModel.create(inputtokens = max_length+1, 
+                                                              vocabsize = vocab_size, 
+                                                              seed=best_seed,
+                                                              lstmunits=int(best_geom_list[0]), 
+                                                              denseunits = int(best_geom_list[1]), 
+                                                              embedding = int(best_geom_list[2]))
+                        
+                        multi_model = model_opt
+
+                    batch_size = int(params[:,0][0])
+                    custom_adam = Adam(lr=math.pow(10,-float(params[:,1][0])))
+                    multi_model.compile(loss='mse', optimizer=custom_adam, metrics=[metrics.mae,metrics.mse])
+
+                    history = multi_model.fit_generator(generator = DataSequence(x_train_enum_tokens,
+                                                                                 vocab = tokens, 
+                                                                                 max_length = max_length, 
+                                                                                 props_set = y_train_enum, 
+                                                                                 batch_size = batch_size), 
+                                                                                 steps_per_epoch = math.ceil(len(x_train_enum_tokens)/batch_size)//bayopt_it_factor, 
+                                                        validation_data = DataSequence(x_valid_enum_tokens,
+                                                                                       vocab = tokens, 
+                                                                                       max_length = max_length, 
+                                                                                       props_set = y_valid_enum, 
+                                                                                       batch_size = min(len(x_valid_enum_tokens), batch_size)),
+                                                        validation_steps = math.ceil(len(x_valid_enum_tokens)/min(len(x_valid_enum_tokens), batch_size))//bayopt_it_factor, 
+                                                        epochs = bayopt_n_epochs, 
+                                                        shuffle = True,
+                                                        initial_epoch = 0, 
+                                                        verbose = 0)
+
+                    best_epoch = np.argmin(history.history['val_loss'])
+                    mae_valid = history.history['val_mean_absolute_error'][best_epoch]
+                    mse_valid = history.history['val_mean_squared_error'][best_epoch]
+                    if math.isnan(mse_valid): # discard diverging architectures (rare event)
+                        mae_valid = math.inf
+                        mse_valid = math.inf
+                    print('Valid MAE: {0:0.4f}, RMSE: {1:0.4f}'.format(mae_valid, mse_valid))
+
+                    return mse_valid
+
+                print("Random initialization:\n")
+                Bayes_opt = GPyOpt.methods.BayesianOptimization(f=create_mod_bayopt, 
+                                                                domain=bayopt_bounds, 
+                                                                acquisition_type = 'EI',
+                                                                initial_design_numdata = bayopt_n_rounds,
+                                                                exact_feval = False,
+                                                                normalize_Y = True,
+                                                                num_cores = multiprocessing.cpu_count()-1
+                                                               )
+                print("Optimization:\n")
+                Bayes_opt.run_optimization(max_iter=bayopt_n_rounds)
+                best_arch = [*best_geom_list, *Bayes_opt.x_opt]
+                print("Best arch is:" + str(best_arch))
+                pd.DataFrame(best_arch).to_csv(save_dir+'Best_combination_fold_{}.csv'.format(ifold), index=False)
+            else:
+                best_arch = [lstmunits_ref, denseunits_ref, embedding_ref, batch_size_ref, lr_ref]
+                
+                
             print("***Training the best model.***\n")
             prediction_train_bag = np.zeros((x_train.shape[0], n_runs))
             prediction_valid_bag = np.zeros((x_valid.shape[0], n_runs))
