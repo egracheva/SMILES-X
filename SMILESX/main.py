@@ -324,6 +324,7 @@ def Main(data,
                 def create_mod_bayopt(params):
                     print('Model: {}'.format(params))
 
+
                     model_tag = data_name
 
                     K.clear_session()
