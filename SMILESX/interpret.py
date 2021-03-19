@@ -164,8 +164,10 @@ def Interpretation(data,
 
             smiles_toviz_x_enum_tokens = token.get_tokens(smiles_toviz_x_enum)
 
+            
             print("Examples of tokenized SMILES from a training set:\n{}\n".\
             format(x_train_enum_tokens[:3]))
+
 
             train_unique_tokens = list(token.extract_vocab(x_train_enum_tokens))
             print(train_unique_tokens)
