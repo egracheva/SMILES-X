@@ -54,6 +54,7 @@ def Embedding_Vis(data,
         "Vocabulary file does not exist. Are you sure you have already trained the model?"
     vocab_size = len(tokens)
 
+
     # Add 'pad', 'unk' tokens to the existing list
     tokens, vocab_size = token.add_extra_tokens(tokens, vocab_size)
 

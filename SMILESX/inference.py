@@ -106,6 +106,7 @@ def Inference(data,
     smiles_y_pred_mean_array = np.empty(shape=(0,len(smiles_checked)), dtype='float')
 
 
+
     # If there is a list of folds of interest defined by the user
     if folds_of_interest:
         folds = folds_of_interest
