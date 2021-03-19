@@ -86,6 +86,7 @@ def Main(data,
          augmentation = True, 
          outdir = "./data/", 
          geomopt_on = True,
+         geom_size = 64,
          bayopt_on = True,
          bayopt_n_epochs = 10,
          bayopt_n_rounds = 25, 
@@ -112,6 +113,7 @@ def Main(data,
         
     print("***SMILES_X starts...***\n\n")
     np.random.seed(seed=123)
+    
     # Train/validation/test data splitting - 80/10/10 % at random with diff. seeds for k_fold_number times
     kfold = KFold(k_fold_number, shuffle = True)
     # If there is a list of folds of interest defined by the user
@@ -121,6 +123,7 @@ def Main(data,
     else:
         folds = [n for n in range(0, k_fold_number)]
     ifold = 0
+    
     output_data = data.copy()
     for train_val_idx, test_idx in kfold.split(data.smiles):
         if ifold in folds:        
@@ -215,21 +218,13 @@ def Main(data,
             if geomopt_on:
                 # Operate the first step of the optimization:
                 # geometry optimization (number of units in LSTM and Dense layers)
-                def create_mod_geom(params, seed_range):
-                    # Prepare the data for the evaluation
-                    x_train_enum_tokens_tointvec = token.int_vec_encode(tokenized_smiles_list = x_train_enum_tokens, 
-                                                   max_length = max_length+1, 
-                                                   vocab = tokens)
-                    x_valid_enum_tokens_tointvec = token.int_vec_encode(tokenized_smiles_list = x_valid_enum_tokens, 
-                                                   max_length = max_length+1, 
-                                                   vocab = tokens)
-                    # Evaluation of the untrained model is performed on both training and validation data merged together
-                    x_geom_enum_tokens_tointvec = np.concatenate((x_train_enum_tokens_tointvec, x_valid_enum_tokens_tointvec), axis = 0)
-                    y_geom_enum                 = np.concatenate((y_train_enum, y_valid_enum), axis = 0)
+                def create_mod_geom(params, data, seed_range):
+                    # Base the geometry search on a subset of data,
+                    # same for all geometries and seeds
+                    x_geom_enum_tokens_tointvec, y_geom_enum = data
                     pred_scores = []
                     for seed in range(seed_range):
                         K.clear_session()
-    
                         if n_gpus > 1:
                             if bridge_type == 'NVLink':
                                 model_geom = model.LSTMAttModel.create(inputtokens=max_length+1, 
@@ -265,22 +260,40 @@ def Main(data,
                         score = np.sqrt(mean_squared_error(scaler.inverse_transform(y_geom_enum), scaler.inverse_transform(y_geom_pred)))
                         pred_scores.append(score)
                     mean_score = np.mean(pred_scores)
-                    best_score = np.min(pred_scores)
                     sigma_score = np.std(pred_scores)
+                    best_score = np.min(pred_scores)
                     best_seed = np.argmin(pred_scores)
                     n_nodes = model_geom.count_params()
                     return [mean_score, sigma_score, best_score, best_seed, n_nodes]
     
                 print("***Geometry search.***")
-                if os.path.isfile(save_dir+'fold_{}/Scores.csv'.format(ifold)):
-                    scores = pd.read_csv(save_dir+'fold_{}/Scores.csv'.format(ifold))
+        
+                # Prepare the data for the evaluation
+                x_train_enum_tokens_tointvec = token.int_vec_encode(tokenized_smiles_list = x_train_enum_tokens, 
+                                               max_length = max_length+1, 
+                                               vocab = tokens)
+                x_valid_enum_tokens_tointvec = token.int_vec_encode(tokenized_smiles_list = x_valid_enum_tokens, 
+                                               max_length = max_length+1, 
+                                               vocab = tokens)
+                # Evaluation of the untrained model is performed on both training and validation data merged together
+                x_geom_enum_tokens_tointvec = np.concatenate((x_train_enum_tokens_tointvec, x_valid_enum_tokens_tointvec), axis = 0)
+                y_geom_enum                 = np.concatenate((y_train_enum, y_valid_enum), axis = 0)
+                
+                # Random sampling
+                picked_ind = np.random.choice(range(len(x_geom_enum_tokens_tointvec)), geom_size)
+                x_geom_enum_tokens_tointvec_small = x_geom_enum_tokens_tointvec[picked_ind, :]
+                y_geom_enum_small = y_geom_enum[picked_ind]
+                geom_search_data = [x_geom_enum_tokens_tointvec_small, y_geom_enum_small]
+                
+                if os.path.isfile(save_dir+'Scores_fold_{}.csv'.format(ifold)):
+                    scores = pd.read_csv(save_dir+'Scores_fold_{}.csv'.format(ifold))
                 else:
                     scores = []
                     for n_lstm in geom_bounds[0]:
                         for n_dense in geom_bounds[1]:
                             for n_embed in geom_bounds[2]:
-                                scores.append([n_lstm, n_dense, n_embed] + create_mod_geom([n_lstm, n_dense, n_embed], seed_range))
-                    pd.DataFrame(scores).to_csv(save_dir+'fold_{}/Scores.csv'.format(ifold), index=False)
+                                scores.append([n_lstm, n_dense, n_embed] + create_mod_geom([n_lstm, n_dense, n_embed], geom_search_data, seed_range))
+                    pd.DataFrame(scores).to_csv(save_dir+'Scores_fold_{}.csv'.format(ifold), index=False)
 
                 scores = np.array(scores)
                 metric = scores[:, 4]/scores[:, 3]
@@ -303,6 +316,8 @@ def Main(data,
                 
             print("\nThe best selected geometry is:\n\tLSTM units: {}\n\tDense units: {}\n\tEmbedding dimensions {}\n".\
                  format(int(best_geom_list[0]), int(best_geom_list[1]), int(best_geom_list[2])))
+            
+            print("\nLooking for the best [learning rate, batch size] combination through Bayesian optimisation")
             
             if bayopt_on:
                 # Operate the bayesian optimization of the neural architecture
@@ -443,21 +458,14 @@ def Main(data,
                                                             denseunits = int(best_arch[1]), 
                                                             embedding = int(best_arch[2]))
         
-                    #print("Best model summary:\n")
-                    #print(model_train.summary())
+                    print("Best model summary:\n")
+                    print(model_train.summary())
                     print("\n")
                     multi_model = model_train
         
-                # We define the optimal batch size based on B ~ learning_rate*N_training empiric rule
-                # Read more on it in the paper from Google Brain
-                # "Don't decay the learning rate, increase the batch size" by S.Smith, Q.Le
-                # https://arxiv.org/abs/1711.00489
-                batch_size_max = len(x_train_enum)/100
-                learning_rate = batch_size_max/9/len(x_train_enum)
-                batch_size_schedule = [int(np.ceil(batch_size_max/9)), int(np.ceil(batch_size_max/3)), int(np.ceil(batch_size_max))]
-                # learning_rate_schedule = [bs/len(x_train_enum) for bs in batch_size_schedule]
+                batch_size_schedule = [int(best_arch[3]/3), int(best_arch[3]), int(best_arch[3]*3)]
                 n_epochs_schedule = [int(n_epochs/3), int(n_epochs/3), n_epochs - 2*int(n_epochs/3)]
-                custom_adam = Adam(lr=learning_rate)
+                custom_adam = Adam(lr=math.pow(10,-float(best_arch[4])))
 
                 # Compile the model
                 multi_model.compile(loss='mse', optimizer=custom_adam, metrics=[metrics.mae,metrics.mse])
@@ -467,16 +475,17 @@ def Main(data,
         
                 # Fit the model applying the batch size schedule:
                 n_epochs_done = 0
-                best_val = np.Inf
+                best_loss = np.Inf
                 losses = []
                 val_losses = []
                 for i, batch_size in enumerate(batch_size_schedule):
                     n_epochs_part = n_epochs_schedule[i]
                     ignorebeginning = model.IgnoreBeginningSaveBest(filepath=filepath,
-                                                                    best=best_val,
+                                                                    best_loss=best_loss,
+                                                                    initial_epoch=n_epochs_done,
                                                                     ignore_first_epochs=ignore_first_epochs)
                     callbacks_list = [ignorebeginning] 
-                    print("Schedule step number {0}\nNumber of epochs: {1}, batch size: {2}, learning rate: {3}".format(i+1, n_epochs_part, batch_size, learning_rate))
+                    print("Schedule step number {0}\nNumber of epochs: {1}, batch size: {2}, learning rate: {3}".format(i+1, n_epochs_part, batch_size, best_arch[4]))
                     history = multi_model.fit_generator(generator = DataSequence(x_train_enum_tokens,
                                                                                  vocab = tokens, 
                                                                                  max_length = max_length, 
@@ -494,7 +503,7 @@ def Main(data,
                                                         verbose = 0)
                     losses += history.history['loss']
                     val_losses += history.history['val_loss']
-                    best_val = ignorebeginning.best
+                    best_loss = ignorebeginning.best_loss
                     n_epochs_done += n_epochs_part
     
                 # Summarize history for losses per epoch
@@ -510,7 +519,7 @@ def Main(data,
                 model_train.load_weights(filepath)
 
                 # model_train = load_model(filepath,
-                #                    custom_objects={'AttentionM': model.AttentionM(seed=5)})
+                #                    custom_objects={'AttentionM': model.AttentionM(seed=best_seed)})
         
                 # predict and compare for the training, validation and test sets
                 x_train_enum_tokens_tointvec = token.int_vec_encode(tokenized_smiles_list = x_train_enum_tokens, 
@@ -641,11 +650,11 @@ def Main(data,
                 # Setup the precision of the displayed error to print it cleanly
                 if np.log10(rmse)>0:
                     if np.log10(rmse)<prec-1:
-                        precision_rmse = 1+(prec-1-np.floor(np.log10(rmse)))/10
+                        precision_rmse = '1.' + str(int(prec-1-np.floor(np.log10(rmse))))
                     else:
-                        precision_rmse = 1.0
+                        precision_rmse = '1.0'
                 else:
-                    precision_rmse = (np.abs(np.floor(np.log10(rmse)))+prec-1)/10
+                    precision_rmse = '0.'+str(np.int(np.abs(np.floor(np.log10(rmse)))+prec-1))
 
                 # Error on RMSE when taking into account error on predictions only
                 d_rmse = np.sqrt(np.square(y_true[name]-y_preds_mean[name]).dot(np.square(y_preds_sigma[name]))/N/ssres)
@@ -655,18 +664,17 @@ def Main(data,
                 mae = mean_absolute_error(y_true[name], y_preds_mean[name])
                 # Setup the precision of the displayed error to print it cleanly
                 if np.log10(mae)>0:
-                    if np.log10(rmse)<prec-1:
-                        precision_mae = 1+(prec-1-np.floor(np.log10(mae)))/10
+                    if np.log10(mae)<prec-1:
+                        precision_mae = '1.' + str(int(prec-1-np.floor(np.log10(mae))))
                     else:
-                        precision_mae = 1.0
+                        precision_mae = '1.0'
                 else:
-                    precision_mae = (np.abs(np.floor(np.log10(mae)))+prec-1)/10
+                    precision_mae = '0.'+str(np.int(np.abs(np.floor(np.log10(mae)))+prec-1))
                 # Error on RMSE when taking into account error on predictions only
                 d_mae = np.sqrt(np.sum(np.square(y_preds_sigma[name])))/N
                 # Error on RMSE when taking into account both errors on predictions and true data
                 d_mae_exp = np.sqrt(np.sum(np.square(y_preds_sigma[name]) + np.square(y_err[name])))/N
-
-
+                
 
                 print("Averaged R^2: {0:0.4f}+-{1:0.4f}({2:0.4f})".format(r2, d_r2, d_r2_exp[0]))
                 print("Averaged RMSE: {0:{3}f}+-{1:{3}f}({2:{3}f})".format(rmse, d_rmse, d_rmse_exp[0], precision_rmse))
