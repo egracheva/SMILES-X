@@ -18,6 +18,8 @@ np.set_printoptions(precision=3)
 #         the scaling function: scaler
 def random_split(smiles_input, prop_input, err_input, train_val_idx, test_idx, scaling = True):
     
+    np.random.shuffle(train_val_idx)
+    
     y_err = {}
     train_nsamples = math.ceil(train_val_idx.shape[0]*8/9)
     train_idx = train_val_idx[:train_nsamples]
