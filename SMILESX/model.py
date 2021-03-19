@@ -157,45 +157,48 @@ class IgnoreBeginningSaveBest(Callback):
             Arguments:
             filepath -- where to save the resulting model
             ignore_first_epochs -- how many first epochs to ignore before registering the best validation loss
+            initial_epoch -- the starting epoch number when continuing the training of existing model
             
             """
 
-            def __init__(self, filepath, best, ignore_first_epochs=0):
+            def __init__(self, filepath, best_loss, initial_epoch=0, ignore_first_epochs=0):
                 super(IgnoreBeginningSaveBest, self).__init__()
 
                 self.filepath = filepath
                 self.ignore_first_epochs = ignore_first_epochs
-                self.best = best
+                self.initial_epoch = initial_epoch
+                self.best_loss = best_loss
 
                 # best_weights to store the weights at which the minimum loss occurs.
                 self.best_weights = None
 
             def on_train_begin(self, logs=None):
                 # The epoch the training stops at.
-                self.best_epoch = 0
+                self.best_epoch = self.initial_epoch
 
             def on_epoch_end(self, epoch, logs=None):
-                current = logs.get('val_loss')
+                current_loss = logs.get('val_loss')
                 if epoch%10==0:
                     print("Finished the {}-th epoch".format(epoch))
                 if epoch>self.ignore_first_epochs:
-                    if np.less(current, self.best):
-                        self.best = current
-                        # Record the best weights if the current result is better (less).
+                    if np.less(current_loss, self.best_loss):
+                        self.best_loss = current_loss
+                        # Record the best weights if the current loss result is lower
                         self.best_weights = self.model.get_weights()
                         self.best_epoch = epoch
                         
                     
             def on_train_end(self, logs=None):
                 print("The model will be based on the epoch #{}".format(self.best_epoch))
-                print('Restoring model weights from the end of the best epoch.')
+                print("Restoring model weights from the end of the best epoch.")
                 if self.best_weights is not None:
                     self.model.set_weights(self.best_weights)
                     # Save the final model
                     self.model.save(self.filepath)
-                    print("The best achieved validation loss is {}".format(self.best))
+                    print("The best achieved validation loss is {}".format(self.best_loss))
                 else:
-                    print("The best achieved validation loss is {}".format(self.best))
+                    self.model.save(self.filepath)
+                    print("Save the model as is...")
                 
                 
 ##
