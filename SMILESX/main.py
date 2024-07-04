@@ -910,7 +910,7 @@ def main(data_smiles,
                                                                 dense_depth=dense_depth,
                                                                 model_type=model_type, 
                                                                 output_n_nodes=n_class)
-                        custom_adam = Adam(lr=math.pow(10,-float(hyper_opt["Learning rate"])))
+                        custom_adam = Adam(learning_rate=math.pow(10,-float(hyper_opt["Learning rate"])))
                         
                         # Use Focal Loss when training on highly imbalanced (skewed) data
                         if data_skew:
