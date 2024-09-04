@@ -311,6 +311,64 @@ class LoggingCallback(Callback):
             self.print_fcn(msg)
 ##
 
+
+class RunningAverageLoss(tf.keras.callbacks.Callback):
+    def __init__(self, window_size=5, model_type='regression', data_skew=False, save_best_model=True):
+        super(RunningAverageLoss, self).__init__()
+        self.window_size = window_size
+        self.model_type = model_type,
+        self.data_skew = data_skew,
+        self.train_loss_history = []
+        self.val_loss_history = []
+        self.running_avg_val_loss = []
+        self.best_val_loss = float('inf')
+        self.save_best_model = save_best_model
+        self.best_weights = None
+
+    def on_epoch_end(self, epoch, logs=None):
+        # Store losses
+        # Regression
+        if self.model_type=='regression':
+            inverse = 1
+            train_loss_name = 'loss'
+            val_loss_name = 'val_loss'
+
+        # Classification (skewed and unskewed cases)
+        else:
+            inverse = -1
+            if self.data_skew:
+                train_loss_name = 'precision_at_recall'
+                val_loss_name = 'val_precision_at_recall'
+            else:
+                train_loss_name = 'auc'
+                val_loss_name = 'val_auc'
+
+        train_loss = logs.get(train_loss_name)
+        val_loss = logs.get(val_loss_name)
+
+        if train_loss is not None:
+            self.train_loss_history.append(train_loss)
+        if val_loss is not None:
+            self.val_loss_history.append(val_loss)
+
+            # Calculate running average
+            if len(self.val_loss_history) > self.window_size:
+                self.val_loss_history.pop(0)
+            running_avg = sum(self.val_loss_history[-self.window_size:]) / len(self.val_loss_history[-self.window_size:])
+            self.running_avg_val_loss.append(running_avg)
+
+            # Check if current running average is the best
+            if running_avg < self.best_val_loss:
+                self.best_val_loss = running_avg
+                if self.save_best_model:
+                    self.best_weights = self.model.get_weights()
+
+    def on_train_end(self, logs=None):
+        if self.save_best_model and self.best_weights is not None:
+            self.model.set_weights(self.best_weights)
+##
+
+
 class IgnoreBeginningSaveBest(Callback):
     """Save the best weights only after some number of epochs has been trained.
 
@@ -342,10 +400,14 @@ class IgnoreBeginningSaveBest(Callback):
         (Default: False)
     """
 
-    def __init__(self, filepath, n_epochs, model_type, best_loss=np.Inf, best_epoch=0, initial_epoch=0, ignore_first_epochs=0, data_skew=False, last=False):
+    def __init__(self, filepath, n_epochs, model_type, best_loss=np.Inf, best_epoch=0, initial_epoch=0, ignore_first_epochs=0, window_size=5, data_skew=False, last=False):
         super(IgnoreBeginningSaveBest, self).__init__()
 
         self.filepath = filepath
+        self.window_size = window_size
+        self.train_loss_history = []
+        self.val_loss_history = []
+        self.running_avg_val_loss = []
         self.best_loss = best_loss
         self.best_epoch = best_epoch
         self.end_epoch = initial_epoch + n_epochs
@@ -358,28 +420,47 @@ class IgnoreBeginningSaveBest(Callback):
         self.best_weights = None
 
     def on_epoch_end(self, epoch, logs=None):
+
+        # Regression
         if self.model_type=='regression':
-            current_loss = logs.get('val_loss')
-            # Start saving only starting from a certain epoch
-            if epoch > self.ignore_first_epochs:
-                if np.less(current_loss, self.best_loss):
-                    self.best_loss = current_loss
-                    # Record the best weights if the current loss result is lower
-                    self.best_weights = self.model.get_weights()
-                    self.best_epoch = epoch
+            inverse = 1
+            train_loss_name = 'loss'
+            val_loss_name = 'val_loss'
+
+        # Classification (skewed and unskewed cases)
         else:
+            inverse = -1
             if self.data_skew:
-                loss_name = 'val_precision_at_recall'
+                train_loss_name = 'precision_at_recall'
+                val_loss_name = 'val_precision_at_recall'
             else:
-                loss_name = 'val_auc'
-            current_loss = logs.get(loss_name)
-            # Start saving only starting from a certain epoch
-            if epoch > self.ignore_first_epochs:
-                if np.less(self.best_loss, current_loss):
-                    self.best_loss = current_loss
-                    # Record the best weights if the current loss result is lower
-                    self.best_weights = self.model.get_weights()
-                    self.best_epoch = epoch
+                train_loss_name = 'auc'
+                val_loss_name = 'val_auc'
+
+        train_loss = logs.get(train_loss_name)
+        val_loss = logs.get(val_loss_name)
+
+        if train_loss is not None:
+            self.train_loss_history.append(train_loss)
+        if val_loss is not None:
+            self.val_loss_history.append(val_loss)
+
+        # Calculate running average
+        if len(self.val_loss_history) > self.window_size:
+            self.val_loss_history.pop(0)
+        running_avg = sum(self.val_loss_history[-self.window_size:]) / self.window_size
+        self.running_avg_val_loss.append(running_avg)
+
+        # Start saving only starting from a certain epoch
+        if epoch > self.ignore_first_epochs:
+            if np.less(inverse*running_avg, inverse*self.best_loss):
+                self.best_loss = running_avg
+#                 print(f"Epoch {epoch+1}: New best running average val loss: {self.best_loss:.4f}")
+                # Record the best weights if the current running loss reached its new best
+                self.best_weights = self.model.get_weights()
+                self.best_epoch = epoch
+#             else:
+#                 print(f"Epoch {epoch+1}: Running average val loss: {running_avg:.4f}")
 
     def on_train_end(self, logs=None):
         # Save the model with the best weights if more apochs has spun than requested to ignore
@@ -392,13 +473,13 @@ class IgnoreBeginningSaveBest(Callback):
                 self.model.save(self.filepath)
                 if not self.last:
                     logging.info("Updating current best validation loss in accordance with epoch #{}"\
-                                 .format(self.best_epoch))
+                                 .format(self.best_epoch+1))
                     # Return back to the current state to continue training
                     self.model.set_weights(self.curr_weights)
             if self.last:
                 logging.info("")
                 logging.info("The best validation loss of {:.2f} is achieved at epoch #{}"\
-                             .format(self.best_loss, self.best_epoch))
+                             .format(self.best_loss, self.best_epoch+1))
                 logging.info("")
                 logging.info("Saving the best model to {}"\
                              .format(self.filepath))

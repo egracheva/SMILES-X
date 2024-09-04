@@ -94,6 +94,7 @@ def main(data_smiles,
          bayopt_n_rounds: int = 25,
          bayopt_n_epochs: int = 30,
          bayopt_n_runs: int = 3,
+         bayopt_vis: bool = False,
          n_gpus: int = 1,
          gpus_list: Optional[List[int]] = None,
          gpus_debug: bool = False,
@@ -255,6 +256,9 @@ def main(data_smiles,
         Number of trainings performed for sampled architectures during hyperparameters 
         Bayesian optimisation to average performance per architecture. 
         (Default: 3)
+    bayopt_vis: bool
+        If set to True shows averaged learning curves over the runs of Bayesian optimisation.
+        (Default: False)
     n_gpus: int
         Number of GPUs to be used in parallel. 
         (Default: 1)
@@ -446,6 +450,7 @@ def main(data_smiles,
     logging.info("bayopt_n_rounds = {}".format(bayopt_n_rounds))
     logging.info("bayopt_n_epochs = {}".format(bayopt_n_epochs))
     logging.info("bayopt_n_runs = {}".format(bayopt_n_runs))
+    logging.info("bayopt_vis = {}".format(bayopt_vis))
     logging.info("n_gpus = {}".format(n_gpus))
     logging.info("gpus_list = {}".format(gpus_list))
     logging.info("gpus_debug = {}".format(gpus_debug))
@@ -824,10 +829,11 @@ def main(data_smiles,
                                               bo_rounds=bayopt_n_rounds,
                                               bo_epochs=bayopt_n_epochs,
                                               bo_runs=bayopt_n_runs,
+                                              bayopt_vis=bayopt_vis,
                                               strategy=strategy,
                                               model_type=model_type, 
                                               output_n_nodes=n_class, 
-                                              scale_output=scale_output, 
+                                              scale_output=scale_output,
                                               pretrained_model=pretrained_model)
             else:
                 logging.info("Bayesian optimisation is not requested.")
@@ -976,6 +982,7 @@ def main(data_smiles,
                         logcallback = trainutils.LoggingCallback(print_fcn=logging.info,verbose=train_verbose)
                         # Default callback list
                         callbacks_list = [ignorebeginning, logcallback]
+
                         with strategy.scope():
                             if i == 0:
                                 logging.info("The batch size is initialized at {}".format(batch_size))
