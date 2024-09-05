@@ -285,11 +285,12 @@ def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_le
             # Negative sign to GpyOpt's implementation of Bayesian optimization only allowing minimization
             score_valids.append(score_valid)
 
+        logging.info('Average best validation score: {0:0.4f}'.format(np.mean(score_valids)))
         if bayopt_vis:
             histories_train = np.array(histories_train)
             histories_val = np.array(histories_val)
 
-            fig, ax = plt.subplots(figsize=(7, 5))
+            fig, ax = plt.subplots(figsize=(5, 3))
 
             x = range(1, histories_train.shape[1]+1)
             sns.lineplot(x=x,
@@ -320,7 +321,6 @@ def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_le
 
             plt.legend()
             plt.show()
-        logging.info('Average best validation score: {0:0.4f}'.format(np.mean(score_valids)))
 
         # Return the mean of the validation scores
         score_valids_mean = np.mean(score_valids)
