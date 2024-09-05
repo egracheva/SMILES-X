@@ -1,6 +1,7 @@
 import logging
-import pandas as pd
 import numpy as np
+import pandas as pd
+import seaborn as sns
 
 from typing import Optional
 from typing import List
@@ -19,7 +20,7 @@ from SMILESX import utils
 logger = logging.getLogger()
 
 # Learning curve plotting
-def learning_curve(train_loss, val_loss, data_skew, save_dir: str, data_name: str, ifold: int, run: int, model_type: str) -> None:
+def learning_curve(train_loss, val_loss, val_loss_avg, data_skew, save_dir: str, data_name: str, ifold: int, run: int, model_type: str) -> None:
 
     fig = plt.figure(figsize=(6.75, 5), dpi=200)
 
@@ -39,9 +40,10 @@ def learning_curve(train_loss, val_loss, data_skew, save_dir: str, data_name: st
             plt.ylabel('AUC-ROC', fontsize=18)
     plt.xlabel('Epoch', fontsize=18)
     
-    ax.plot(train_loss, color='#3783ad')
+    ax.plot(train_loss, color='#3783AD')
     if val_loss is not None:
-        ax.plot(val_loss, color='#a3cee6')
+        ax.plot(val_loss, color='#F7A95E')
+        ax.plot(val_loss_avg, color='#E06D00')
 
     for item in ([ax.title, ax.xaxis.label, ax.yaxis.label] + ax.get_xticklabels() + ax.get_yticklabels()):
         item.set_fontsize(14)
@@ -69,18 +71,19 @@ def learning_curve(train_loss, val_loss, data_skew, save_dir: str, data_name: st
                    labelright=True,
                    left=True,
                    labelleft=True)
+    
     if ifold is not None:
         if model_type == 'regression':
-            ax.legend(['Train', 'Validation'], loc='upper right', fontsize=14)
+            ax.legend(['Train', 'Validation', 'Validation (running avg)'], loc='upper right', fontsize=12)
         else:
-            ax.legend(['Train', 'Validation'], loc='upper left', fontsize=14)
+            ax.legend(['Train', 'Validation', 'Validation (running avg)'], loc='upper left', fontsize=12)
         plt.savefig('{}/{}_LearningCurve_Fold_{}_Run_{}.png'\
                     .format(save_dir, data_name, ifold, run), bbox_inches='tight')
     else:
         if model_type == 'regression':
-            ax.legend(['Train'], loc='upper right', fontsize=14)
+            ax.legend(['Train'], loc='upper right', fontsize=12)
         else:
-            ax.legend(['Train'], loc='upper left', fontsize=14)
+            ax.legend(['Train'], loc='upper left', fontsize=12)
         plt.savefig('{}/{}_LearningCurve_Run_{}.png'\
                 .format(save_dir, data_name, run), bbox_inches='tight')
     plt.close()
