@@ -22,7 +22,7 @@ from tensorflow.keras.optimizers import Adam, SGD
 
 from SMILESX import utils, augm, token, model, trainutils
 
-def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_length, check_smiles, augmentation, data_skew, hyper_bounds, hyper_opt, dense_depth, bo_rounds, bo_epochs, bo_runs, bayopt_vis, strategy, model_type, output_n_nodes, scale_output, pretrained_model=None):
+def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_length, check_smiles, augmentation, data_skew, hyper_bounds, hyper_opt, dense_depth, bo_rounds, bo_epochs, bo_runs, bayopt_vis, window_size, strategy, model_type, output_n_nodes, scale_output, pretrained_model=None):
     '''Bayesian optimization of hyperparameters.
 
     Parameters
@@ -45,7 +45,6 @@ def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_le
         Whether to perform data augmentation during bayesian optimization process.
     data_skew: bool
         Whether the classes in the input data are imbalanced.
-        (Default: False)
     hyper_bounds: dict
         A dictionary of bounds {"param":[bounds]}, where parameter `"param"` can be
         embedding, LSTM, time-distributed dense layer units, batch size or learning
@@ -65,6 +64,8 @@ def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_le
         Number of training repetitions with random train/val split.
     bayopt_vis: bool
         Whether to show the learning curves for each tried hyperparameters combinations
+    window_size: int
+        Window size for running average.
     strategy:
         GPU memory growth strategy.
     model_type: str
@@ -139,6 +140,7 @@ def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_le
         score_valids = []
         histories_train = []
         histories_val = []
+        histories_val_avg = []
         for irun in range(bo_runs):
             # Preparing the data for optimization
             # Random train/val splitting for every run to assure better generalizability of the optimized parameters
@@ -244,7 +246,7 @@ def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_le
                 batch_size = int(hyper_bo['Batch size']) * strategy.num_replicas_in_sync
                 batch_size_val = min(len(x_train_enum_tokens_tointvec), batch_size)
                 custom_adam = Adam(learning_rate=math.pow(10,-float(hyper_bo['Learning rate'])))
-                running_loss = trainutils.RunningAverageLoss(window_size=5, model_type=model_type, data_skew=data_skew)
+                running_loss = trainutils.RunningAverageLoss(window_size=window_size, model_type=model_type, warm_up=int(bo_epochs/2), data_skew=data_skew)
                 callbacks_list = [running_loss]
                 if data_skew:
                     model_opt.compile(loss=trainutils.FocalLossCustom(alpha=0.2, gamma=2.0), optimizer=custom_adam, metrics=model_metrics)
@@ -268,27 +270,26 @@ def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_le
                                                   verbose=0)
                 histories_train.append(history.history[hist_train_name])
                 histories_val.append(history.history[hist_val_name])
+                histories_val_avg.append(running_loss.running_avg_val_loss)
 
-            # Skip the first half of epochs during evaluation
-            # Ignore the noisy burn-in period of training
-            if model_type == 'regression':
-                # Minimize loss for regression problems
-                best_epoch = np.argmin(history.history[hist_val_name][int(bo_epochs//2):])
-                score_valid = history.history[hist_val_name][best_epoch + int(bo_epochs//2)]
-            else:
-                # Maximize AUC-ROC or AUC-PRC for classification problems
-                best_epoch = np.argmax(history.history[hist_val_name][int(bo_epochs//2):])
-                score_valid = -1 * history.history[hist_val_name][best_epoch + int(bo_epochs//2)]
+        # Skip the first half of epochs during evaluation
+        # Ignore the noisy burn-in period of training
+        # Minimize the metric for regression problems and maximize it for classification
 
-            if math.isnan(score_valid): # treat diverging architectures (rare event)
-                score_valid = math.inf
-            # Negative sign to GpyOpt's implementation of Bayesian optimization only allowing minimization
-            score_valids.append(score_valid)
+        histories_val_avg = np.array(histories_val_avg)
+        mean_histories_val_avg = running_loss.inverse*histories_val_avg.mean(axis=0)
+        
+        score_valid = np.min(running_loss.inverse*mean_histories_val_avg)
 
-        logging.info('Average best validation score: {0:0.4f}'.format(np.mean(score_valids)))
+        if math.isnan(score_valid): # treat diverging architectures (rare event)
+            score_valid = math.inf
+
+        logging.info('Average best validation score: {0:0.4f}'.format(score_valid))
+        
         if bayopt_vis:
             histories_train = np.array(histories_train)
             histories_val = np.array(histories_val)
+            
 
             fig, ax = plt.subplots(figsize=(5, 3))
 
@@ -297,23 +298,42 @@ def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_le
                          y=histories_train.mean(axis=0),
                          ax=ax,
                          label='Training Loss',
-                         color='#4A83B5',
+                         color='#3783AD',
                          linewidth=2.5)
             sns.lineplot(x=x,
                          y=histories_val.mean(axis=0),
                          ax=ax,
+                         label='Running Validation Loss',
+                         color='#F7A95E',
+                         linewidth=2.5)
+            
+            sns.lineplot(x=x[int(bo_epochs/2)-1:],
+                         y=histories_val_avg.mean(axis=0)[int(bo_epochs/2)-1:],
+                         ax=ax,
                          label='Running Average Validation Loss',
                          color='#E06D00',
                          linewidth=2.5)
+            
+            sns.lineplot(x=x[:int(bo_epochs/2)],
+                         y=histories_val_avg.mean(axis=0)[:int(bo_epochs/2)],
+                         ax=ax,
+                         color='#E06D00',
+                         linewidth=2.5,
+                         dashes=(2, 2))
 
             plt.fill_between(x,
                              histories_train.mean(axis=0) - histories_train.std(axis=0),
                              histories_train.mean(axis=0) + histories_train.std(axis=0),
-                             color='#4A83B5', alpha=0.2, linewidth=0.0)
+                             color='#3783AD', alpha=0.2, linewidth=0.0)
 
             plt.fill_between(x,
                              histories_val.mean(axis=0) - histories_val.std(axis=0),
                              histories_val.mean(axis=0) + histories_val.std(axis=0),
+                             color='#F7A95E', alpha=0.2, linewidth=0.0)
+            
+            plt.fill_between(x,
+                             histories_val_avg.mean(axis=0) - histories_val_avg.std(axis=0),
+                             histories_val_avg.mean(axis=0) + histories_val_avg.std(axis=0),
                              color='#E06D00', alpha=0.2, linewidth=0.0)
 
             ax.set_xlabel('Epochs', fontsize=14)
@@ -322,10 +342,7 @@ def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_le
             plt.legend()
             plt.show()
 
-        # Return the mean of the validation scores
-        score_valids_mean = np.mean(score_valids)
-
-        return score_valids_mean
+        return score_valid
 
     start_bo = time.time()
 
