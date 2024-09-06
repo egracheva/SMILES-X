@@ -74,9 +74,9 @@ def learning_curve(train_loss, val_loss, val_loss_avg, data_skew, save_dir: str,
     
     if ifold is not None:
         if model_type == 'regression':
-            ax.legend(['Train', 'Validation', 'Validation (running avg)'], loc='upper right', fontsize=12)
+            ax.legend(['Train', 'Validation', 'Running Average Validation'], loc='upper right', fontsize=12)
         else:
-            ax.legend(['Train', 'Validation', 'Validation (running avg)'], loc='upper left', fontsize=12)
+            ax.legend(['Train', 'Validation', 'Running Average Validation'], loc='upper left', fontsize=12)
         plt.savefig('{}/{}_LearningCurve_Fold_{}_Run_{}.png'\
                     .format(save_dir, data_name, ifold, run), bbox_inches='tight')
     else:
@@ -88,6 +88,7 @@ def learning_curve(train_loss, val_loss, val_loss_avg, data_skew, save_dir: str,
                 .format(save_dir, data_name, run), bbox_inches='tight')
     plt.close()
 ##
+   
 
 # Metric curve plotting for LM
 def lm_metric_curve(train_metric, imetrics, imetrics_p, save_dir: str, data_name: str, run: int) -> None:
@@ -135,6 +136,61 @@ def lm_metric_curve(train_metric, imetrics, imetrics_p, save_dir: str, data_name
             .format(save_dir, data_name, run), bbox_inches='tight')
     plt.close()
 ##
+
+
+def bo_curves(histories_train, histories_val, histories_val_avg):
+    fig, ax = plt.subplots(figsize=(5, 3))
+
+    x = range(1, histories_train.shape[1]+1)
+    sns.lineplot(x=x,
+                 y=histories_train.mean(axis=0),
+                 ax=ax,
+                 label='Training Loss',
+                 color='#3783AD',
+                 linewidth=2.5)
+    sns.lineplot(x=x,
+                 y=histories_val.mean(axis=0),
+                 ax=ax,
+                 label='Validation Loss',
+                 color='#F7A95E',
+                 linewidth=2.5)
+
+    sns.lineplot(x=x[int(bo_epochs/2)-1:],
+                 y=histories_val_avg.mean(axis=0)[int(bo_epochs/2)-1:],
+                 ax=ax,
+                 label='Running Average Validation Loss',
+                 color='#E06D00',
+                 linewidth=2.5)
+
+    sns.lineplot(x=x[:int(bo_epochs/2)],
+                 y=histories_val_avg.mean(axis=0)[:int(bo_epochs/2)],
+                 ax=ax,
+                 color='#E06D00',
+                 linewidth=2.5,
+                 dashes=(2, 2))
+
+    plt.fill_between(x,
+                     histories_train.mean(axis=0) - histories_train.std(axis=0),
+                     histories_train.mean(axis=0) + histories_train.std(axis=0),
+                     color='#3783AD', alpha=0.2, linewidth=0.0)
+
+    plt.fill_between(x,
+                     histories_val.mean(axis=0) - histories_val.std(axis=0),
+                     histories_val.mean(axis=0) + histories_val.std(axis=0),
+                     color='#F7A95E', alpha=0.2, linewidth=0.0)
+
+    plt.fill_between(x,
+                     histories_val_avg.mean(axis=0) - histories_val_avg.std(axis=0),
+                     histories_val_avg.mean(axis=0) + histories_val_avg.std(axis=0),
+                     color='#E06D00', alpha=0.2, linewidth=0.0)
+
+    ax.set_xlabel('Epochs', fontsize=14)
+    ax.set_ylabel('Loss', fontsize=14)
+
+    plt.legend()
+    plt.show()
+##
+
 
 ## Compute diverse scores to quantify model's performance on classification tasks
 def classification_metrics(y_true, y_pred, model_type, prec, average=None, labels=None):

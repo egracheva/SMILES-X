@@ -290,57 +290,8 @@ def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_le
             histories_train = np.array(histories_train)
             histories_val = np.array(histories_val)
             
-
-            fig, ax = plt.subplots(figsize=(5, 3))
-
-            x = range(1, histories_train.shape[1]+1)
-            sns.lineplot(x=x,
-                         y=histories_train.mean(axis=0),
-                         ax=ax,
-                         label='Training Loss',
-                         color='#3783AD',
-                         linewidth=2.5)
-            sns.lineplot(x=x,
-                         y=histories_val.mean(axis=0),
-                         ax=ax,
-                         label='Running Validation Loss',
-                         color='#F7A95E',
-                         linewidth=2.5)
-            
-            sns.lineplot(x=x[int(bo_epochs/2)-1:],
-                         y=histories_val_avg.mean(axis=0)[int(bo_epochs/2)-1:],
-                         ax=ax,
-                         label='Running Average Validation Loss',
-                         color='#E06D00',
-                         linewidth=2.5)
-            
-            sns.lineplot(x=x[:int(bo_epochs/2)],
-                         y=histories_val_avg.mean(axis=0)[:int(bo_epochs/2)],
-                         ax=ax,
-                         color='#E06D00',
-                         linewidth=2.5,
-                         dashes=(2, 2))
-
-            plt.fill_between(x,
-                             histories_train.mean(axis=0) - histories_train.std(axis=0),
-                             histories_train.mean(axis=0) + histories_train.std(axis=0),
-                             color='#3783AD', alpha=0.2, linewidth=0.0)
-
-            plt.fill_between(x,
-                             histories_val.mean(axis=0) - histories_val.std(axis=0),
-                             histories_val.mean(axis=0) + histories_val.std(axis=0),
-                             color='#F7A95E', alpha=0.2, linewidth=0.0)
-            
-            plt.fill_between(x,
-                             histories_val_avg.mean(axis=0) - histories_val_avg.std(axis=0),
-                             histories_val_avg.mean(axis=0) + histories_val_avg.std(axis=0),
-                             color='#E06D00', alpha=0.2, linewidth=0.0)
-
-            ax.set_xlabel('Epochs', fontsize=14)
-            ax.set_ylabel('Loss', fontsize=14)
-
-            plt.legend()
-            plt.show()
+            # Display learning curves
+            bo_curves(histories_train, histories_val, histories_val_avg)
 
         return score_valid
 
