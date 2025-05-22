@@ -90,6 +90,44 @@ def learning_curve(train_loss, val_loss, val_loss_avg, data_skew, save_dir: str,
 ##
    
 
+def lm_cun_curve(cor_list, uniq_list, novel_list, cun_list, output_dir, data_name, run):
+    fig, ax = plt.subplots(figsize=(6.75, 5), dpi=200)
+    
+    x = range(1, len(cun_list)+1)
+    sns.lineplot(x=x,
+                 y=cor_list,
+                 ax=ax,
+                 label='Correctness',
+                 color='#B3DED6',
+                 linewidth=1.5)
+    sns.lineplot(x=x,
+                 y=uniq_list,
+                 ax=ax,
+                 label='Uniqueness',
+                 color='#AB56A6',
+                 linewidth=1.5)
+    sns.lineplot(x=x,
+                 y=novel_list,
+                 ax=ax,
+                 label='Novelty',
+                 color='#FFA114',
+                 linewidth=1.5)
+    sns.lineplot(x=x,
+                 y=100*np.array(cun_list),
+                 ax=ax,
+                 label='CxUxN',
+                 color='#3B3939',
+                 linewidth=1.5)
+    
+    ax.set_xlabel('Epochs', fontsize=14)
+    ax.set_ylabel('Score', fontsize=14)
+    
+    plt.legend()
+    plt.savefig('{}/{}_Model_Run_{}_History_CxUxN_score.png'.format(output_dir, data_name, run), bbox_inches='tight')
+    plt.show()
+##
+
+
 # Metric curve plotting for LM
 def lm_metric_curve(train_metric, imetrics, imetrics_p, save_dir: str, data_name: str, run: int) -> None:
 
@@ -155,15 +193,15 @@ def bo_curves(histories_train, histories_val, histories_val_avg):
                  color='#F7A95E',
                  linewidth=2.5)
 
-    sns.lineplot(x=x[int(bo_epochs/2)-1:],
-                 y=histories_val_avg.mean(axis=0)[int(bo_epochs/2)-1:],
+    sns.lineplot(x=x[int(histories_train.shape[1]/2)-1:],
+                 y=histories_val_avg.mean(axis=0)[int(histories_train.shape[1]/2)-1:],
                  ax=ax,
                  label='Running Average Validation Loss',
                  color='#E06D00',
                  linewidth=2.5)
 
-    sns.lineplot(x=x[:int(bo_epochs/2)],
-                 y=histories_val_avg.mean(axis=0)[:int(bo_epochs/2)],
+    sns.lineplot(x=x[:int(histories_train.shape[1]/2)],
+                 y=histories_val_avg.mean(axis=0)[:int(histories_train.shape[1]/2)],
                  ax=ax,
                  color='#E06D00',
                  linewidth=2.5,

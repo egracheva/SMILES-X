@@ -38,7 +38,6 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, LearningRateScheduler
-from tensorflow.keras.models import load_model
 from tensorflow.keras import metrics
 from tensorflow.keras import backend as K
 
@@ -47,7 +46,7 @@ from sklearn.model_selection import GroupKFold, StratifiedKFold
 from SMILESX import utils, token, augm
 from SMILESX import model, bayopt, geomopt
 from SMILESX import visutils, trainutils
-from SMILESX import loadmodel
+# from SMILESX import loadmodel
 
 np.random.seed(seed=123)
 np.set_printoptions(precision=3)
@@ -91,6 +90,7 @@ def generative_main(data_smiles,
                     gpus_list: Optional[List[int]] = None,
                     gpus_debug: bool = False,
                     patience: int = 25,
+                    warm_up: int = 0,
                     n_epochs: int = 100,
                     batchsize_pergpu: Optional[int] = None,
                     lr_schedule: Optional[str] = None,
@@ -224,6 +224,9 @@ def generative_main(data_smiles,
         Used for early stopping. Patience is the number of epochs before stopping training when 
         the validation error has stopped improving. 
         (Default: 25)
+    warm_up: int
+        The number of initial epochs that should be ignored.
+        (Default: 0)
     n_epochs: int
         Maximum number of epochs for training. 
         (Default: 100)
@@ -343,6 +346,7 @@ def generative_main(data_smiles,
     logging.info("n_gpus = {}".format(n_gpus))
     logging.info("gpus_list = {}".format(gpus_list))
     logging.info("gpus_debug = {}".format(gpus_debug))
+    logging.info("warm_up = {}".format(warm_up))
     logging.info("patience = {}".format(patience))
     logging.info("n_epochs = {}".format(n_epochs))
     logging.info("batchsize_pergpu = {}".format(batchsize_pergpu))
@@ -387,6 +391,7 @@ def generative_main(data_smiles,
             logging.info("The number of runs per fold (`n_runs`) is not defined.")
             logging.info("Borrowing it from the pretrained model...")
             logging.info("Number of runs `n_runs` is set to {}". format(model.n_runs))
+            
         logging.info("Fine tuning has been requested, loading pretrained model...")
         # TODO (Guillaume): check if the pretrained model is loaded correctly 
         # pretrained_model = loadmodel.LoadModel(data_name = pretrained_data_name,
@@ -510,7 +515,12 @@ def generative_main(data_smiles,
         logging.info("")
     else:
         logging.info("No geometry optimisation file found for the current dataset.")
-        logging.info("Using reference values for hyperparameters.")
+        logging.info("Using reference values for hyperparameters:")
+        for key in hyper_opt.keys():
+            if key == "Learning rate":
+                logging.info("    - {}: 10^-{}".format(key, hyper_opt[key]))
+            else:
+                logging.info("    - {}: {}".format(key, hyper_opt[key]))
         logging.info("")
 
     logging.info("*** HYPERPARAMETERS RETRIEVAL COMPLETED ***")
@@ -542,11 +552,11 @@ def generative_main(data_smiles,
         logging.info(time.strftime("%m/%d/%Y %H:%M:%S", time.localtime()))
 
         # Checkpoint, Early stopping and callbacks definition
-        filepath = '{}/{}_Model_Run_{}_Best_Epoch.hdf5'.format(model_dir, data_name, run)
+        filepath = '{}/{}_Model_Run_{}.hdf5'.format(model_dir, data_name, run)
             
         if train_mode == 'off' or os.path.exists(filepath):
-            logging.info("Training was set to `off`.")
-            logging.info("Evaluating performance based on the previously trained models...")
+#             logging.info("Training was set to `off`.")
+            logging.info("This model has been trained already. Skipping...")
             logging.info("")
         else:
             # Create and compile the model
@@ -576,7 +586,7 @@ def generative_main(data_smiles,
                                                             dense_depth=dense_depth,
                                                             model_type=model_type, 
                                                             output_n_nodes=n_class)
-                    custom_adam = Adam(lr=hyper_opt["Learning rate"])
+                    custom_adam = Adam(learning_rate=math.pow(10,-float(hyper_opt["Learning rate"])))
                     model_train.compile(loss=model_loss, optimizer=custom_adam, metrics=model_metrics)
                 if run==0:
                     logging.info("Model summary:")
@@ -591,43 +601,36 @@ def generative_main(data_smiles,
             logging.info("Total fixed batch size: {} ({} / gpu)\n".format(batch_size, batchsize_pergpu))
             logging.info("")
 
-            # ignorebeginning = trainutils.IgnoreBeginningSaveBest(filepath=filepath,
-            #                                                      n_epochs=n_epochs,
-            #                                                      best_loss=np.Inf,
-            #                                                      initial_epoch=0,
-            #                                                      ignore_first_epochs=ignore_first_epochs)
-            logcallback = trainutils.LoggingCallback(print_fcn=logging.info,verbose=train_verbose)
-            
-            filepath_tmp = model_dir+'/'+data_name+'_Model_Run_'+str(run)+'_Epoch_{epoch:02d}.hdf5'
-            checkpoint = ModelCheckpoint(filepath_tmp, 
-                                         monitor='loss', 
-                                         verbose=0, 
-                                         save_best_only=False, 
-                                         mode='min')
+            logcallback = trainutils.LoggingCallback(print_fcn=logging.info, verbose=train_verbose)
+                        
+            # CxUxN score computation with early stopping based on its value
+            cun = trainutils.CUN(init_data=data_smiles.flatten().tolist(),
+                                 filepath=filepath,
+                                 gen_tokens=tokens,
+                                 gen_max_length = max_length,
+                                 n_generate=1000,
+                                 warm_up=warm_up,
+                                 batch_size = 8096,
+                                 patience=patience,
+                                 verbose=train_verbose)
 
-            earlystopping = EarlyStopping(monitor='loss', 
-                                          min_delta=0, 
-                                          patience=patience, 
-                                          verbose=0, 
-                                          mode='min')
-            # Default callback list
-            #callbacks_list = [ignorebeginning, logcallback]
-            callbacks_list = [checkpoint, earlystopping, logcallback]
+            callbacks_list = [cun, logcallback]
+            
             # Additional callbacks
             if lr_schedule == 'decay':
-                schedule = trainutils.StepDecay(initAlpha=lr_max,
+                schedule = trainutils.StepDecay(initAlpha=math.pow(10,-float(hyper_opt["Learning rate"])),
                                                 finalAlpha=lr_min,
                                                 gamma=0.95,
                                                 epochs=n_epochs)
                 callbacks_list.append(LearningRateScheduler(schedule))
             elif lr_schedule == 'clr':
                 clr = trainutils.CyclicLR(base_lr=lr_min,
-                                          max_lr=lr_max,
+                                          max_lr=math.pow(10,-float(hyper_opt["Learning rate"])),
                                           step_size=8*(len(x_train_enum_tokens_tointvec) // batchsize_pergpu),
                                           mode='triangular')
                 callbacks_list.append(clr)
             elif lr_schedule == 'cosine':
-                cosine_anneal = trainutils.CosineAnneal(initial_learning_rate=lr_max,
+                cosine_anneal = trainutils.CosineAnneal(initial_learning_rate=math.pow(10,-float(hyper_opt["Learning rate"])),
                                                         final_learning_rate=lr_min,
                                                         epochs=n_epochs)
                 callbacks_list.append(cosine_anneal)
@@ -635,10 +638,10 @@ def generative_main(data_smiles,
             # Fit the model
             with strategy.scope():
                 history = model_train.fit(\
-                                trainutils.LM_DataSequence(hash_set = x_train_enum_tokens_hash, 
-                                                           smiles_set = x_train_enum_tokens_tointvec,
-                                                           vocab_size = n_class,
-                                                           max_length = max_length + 1,
+                                trainutils.LM_DataSequence(hash_set=x_train_enum_tokens_hash, 
+                                                           smiles_set=x_train_enum_tokens_tointvec,
+                                                           vocab_size=n_class,
+                                                           max_length=max_length + 1,
                                                            batch_size=batch_size),
                                 shuffle=False,
                                 epochs=n_epochs,
@@ -651,39 +654,20 @@ def generative_main(data_smiles,
             for imetrics in metrics_list[:-1]:
                 history_train_loss_tmp = history.history[imetrics]
                 if imetrics == 'loss':
-                    visutils.learning_curve(history_train_loss_tmp, None, lcurve_dir, data_name, None, run, model_type)
+                    visutils.learning_curve(history_train_loss_tmp, None, None, False, lcurve_dir, data_name, None, run, 'other')
                 else:
                     imetrics_p = metrics_list[-1]
                     history_train_metric_tmp = history.history[imetrics_p]
                     visutils.lm_metric_curve(history_train_metric_tmp, imetrics, imetrics_p, lcurve_dir, data_name, run)
-
-            logging.info("\n\nBest loss @ Epoch #{}\n".format(np.argmin(history.history['loss'])))
-            logging.info("")
-
-            logging.info("***CxUxN scores history during the training.***\n")
-            cun_metric = trainutils.CxUxN(init_data = data_smiles.flatten().tolist(), 
-                                          data_name = data_name, 
-                                          vocab = tokens, 
-                                          gen_max_length = max_length+1, 
-                                          gpus = gpus,
-                                          model_init = model_train, 
-                                          n_generate = 1000,
-                                          warm_up = 0, 
-                                          batch_size = 8096, 
-                                          print_fcn = logging.info, 
-                                          model_dir = model_dir, 
-                                          run = run, 
-                                          results_dir = res_plot_run_dir, 
-                                          verbose = True)
-            filepath_tmp_trunc = '{}/{}_Model_Run_{}_Epoch_*.hdf5'.format(model_dir, data_name, run)
-            evaluated_epochs_list = glob.glob(filepath_tmp_trunc)
-            for iepoch in range(len(evaluated_epochs_list)):
-                cun_metric.evaluation(iepoch)
-            cun_metric.on_evaluation_end()
-            logging.info("")
-
-        logging.info("Evaluating performance of the trained model...")
-        logging.info("")
+            
+            # Plotting the CUN curve
+            visutils.lm_cun_curve(cun.cor_list,
+                         cun.uniq_list,
+                         cun.novel_list,
+                         cun.cun_list,
+                         res_plot_run_dir,
+                         data_name,
+                         run)
 
         end_run = time.time()
         elapsed_run = end_run - start_run

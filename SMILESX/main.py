@@ -49,7 +49,7 @@ from SMILESX import model, bayopt, geomopt
 from SMILESX import visutils, trainutils
 from SMILESX import loadmodel
 
-np.random.seed(seed=123)
+np.random.seed(seed=124)
 np.set_printoptions(precision=3)
 tf.autograph.set_verbosity(3)
 tf.get_logger().setLevel('ERROR')
@@ -84,6 +84,7 @@ def main(data_smiles,
          dense_depth: Optional[int] = 0,
          bs_ref: int = 16,
          lr_ref: float = 3.9,
+         running_average_window: int = 5,
          k_fold_number: Optional[int] = 5,
          k_fold_index: Optional[List[int]] = None,
          run_index: Optional[List[int]] = None,
@@ -222,6 +223,9 @@ def main(data_smiles,
         User defined learning rate (no Bayesian optimisation) translated to the Adam optimizer as 
         10**(-lr_ref). 
         (Default: 3.9)
+    running_average_window: int
+        Window size for running average during training.
+        (Default: 5)
     k_fold_number: int
         Number of folds used for a k-fold cross-validation. 
         (Default: 5)
@@ -441,6 +445,7 @@ def main(data_smiles,
     logging.info("dense_depth = {}".format(dense_depth))
     logging.info("bs_ref = {}".format(bs_ref))
     logging.info("lr_ref = {}".format(lr_ref))
+    logging.info("running_average_window = {}".format(running_average_window))
     logging.info("k_fold_number = {}".format(k_fold_number))
     logging.info("k_fold_index = {}".format(k_fold_index))
     logging.info("run_index = {}".format(run_index))
@@ -467,9 +472,8 @@ def main(data_smiles,
     logging.info("log_verbose = {}".format(log_verbose))
     logging.info("train_verbose = {}".format(train_verbose))
     logging.info("******")
-    logging.info("")
-
-    # Setting up GPUs
+    logging.info("")    
+    
     strategy, gpus = utils.set_gpuoptions(n_gpus=n_gpus,
                                           gpus_list=gpus_list,
                                           gpus_debug=gpus_debug)
@@ -830,6 +834,7 @@ def main(data_smiles,
                                               bo_epochs=bayopt_n_epochs,
                                               bo_runs=bayopt_n_runs,
                                               bayopt_vis=bayopt_vis,
+                                              window_size=running_average_window,
                                               strategy=strategy,
                                               model_type=model_type, 
                                               output_n_nodes=n_class, 
@@ -952,6 +957,7 @@ def main(data_smiles,
                     # During BS increments model is trained 3 times, histories should be stitched manually
                     history_train_loss = []
                     history_val_loss = []
+                    history_val_loss_avg = []
 
                     # Define callbacks
                     n_epochs_done = 0
@@ -1011,7 +1017,8 @@ def main(data_smiles,
                                       workers=1)
                         history_train_loss += history.history[hist_train_name]
                         history_val_loss += history.history[hist_val_name]
-                        best_loss = ignorebeginning.best_loss
+                        history_val_loss_avg += ignorebeginning.running_avg_val_loss
+                        best_loss = c.best_loss
                         best_epoch = ignorebeginning.best_epoch
                         n_epochs_done += n_epochs_part
                 else:
@@ -1031,20 +1038,20 @@ def main(data_smiles,
                     callbacks_list = [ignorebeginning, logcallback]
                     # Additional callbacks
                     if lr_schedule == 'decay':
-                        schedule = trainutils.StepDecay(initAlpha=lr_max,
+                        schedule = trainutils.StepDecay(initAlpha=math.pow(10,-float(hyper_opt["Learning rate"])),
                                                         finalAlpha=lr_min,
                                                         gamma=0.95,
                                                         epochs=n_epochs)
                         callbacks_list.append(LearningRateScheduler(schedule))
                     elif lr_schedule == 'clr':
                         clr = trainutils.CyclicLR(base_lr=lr_min,
-                                                  max_lr=lr_max,
+                                                  max_lr=math.pow(10,-float(hyper_opt["Learning rate"])),
                                                   step_size=8*(x_train_enum_tokens_tointvec.shape[0] // \
                                                               (batch_size//strategy.num_replicas_in_sync)),
                                                   mode='triangular')
                         callbacks_list.append(clr)
                     elif lr_schedule == 'cosine':
-                        cosine_anneal = trainutils.CosineAnneal(initial_learning_rate=lr_max,
+                        cosine_anneal = trainutils.CosineAnneal(initial_learning_rate=math.pow(10,-float(hyper_opt["Learning rate"])),
                                                                 final_learning_rate=lr_min,
                                                                 epochs=n_epochs)
                         callbacks_list.append(cosine_anneal)
@@ -1072,10 +1079,12 @@ def main(data_smiles,
 
                     history_train_loss = history.history[hist_train_name]
                     history_val_loss = history.history[hist_val_name]
+                    history_val_loss_avg = ignorebeginning.running_avg_val_loss
 
                 # Summarize history for losses per epoch
                 visutils.learning_curve(history_train_loss,
                                         history_val_loss,
+                                        history_val_loss_avg,
                                         data_skew,
                                         lcurve_dir,
                                         data_name,
@@ -1086,20 +1095,20 @@ def main(data_smiles,
                 logging.info("Evaluating performance of the trained model...")
                 logging.info("")
 
-            with tf.device(gpus[0].name):
-                K.clear_session()
-                if data_skew:
-                    model_train = load_model(filepath, custom_objects={'SoftAttention': model.SoftAttention(), 'FocalLossCustom': trainutils.FocalLossCustom})
-                else:
-                    model_train = load_model(filepath, custom_objects={'SoftAttention': model.SoftAttention()})
-                if data_extra is not None:
-                    y_pred_train = model_train.predict({"smiles": x_train_enum_tokens_tointvec, "extra": extra_train_enum})
-                    y_pred_valid = model_train.predict({"smiles": x_valid_enum_tokens_tointvec, "extra": extra_valid_enum})
-                    y_pred_test = model_train.predict({"smiles": x_test_enum_tokens_tointvec, "extra": extra_test_enum})
-                else:
-                    y_pred_train = model_train.predict({"smiles": x_train_enum_tokens_tointvec})
-                    y_pred_valid = model_train.predict({"smiles": x_valid_enum_tokens_tointvec})
-                    y_pred_test = model_train.predict({"smiles": x_test_enum_tokens_tointvec})
+#             with tf.device(gpus[0].name):
+            K.clear_session()
+            if data_skew:
+                model_train = load_model(filepath, custom_objects={'SoftAttention': model.SoftAttention(), 'FocalLossCustom': trainutils.FocalLossCustom})
+            else:
+                model_train = load_model(filepath, custom_objects={'SoftAttention': model.SoftAttention()})
+            if data_extra is not None:
+                y_pred_train = model_train.predict({"smiles": x_train_enum_tokens_tointvec, "extra": extra_train_enum})
+                y_pred_valid = model_train.predict({"smiles": x_valid_enum_tokens_tointvec, "extra": extra_valid_enum})
+                y_pred_test = model_train.predict({"smiles": x_test_enum_tokens_tointvec, "extra": extra_test_enum})
+            else:
+                y_pred_train = model_train.predict({"smiles": x_train_enum_tokens_tointvec})
+                y_pred_valid = model_train.predict({"smiles": x_valid_enum_tokens_tointvec})
+                y_pred_test = model_train.predict({"smiles": x_test_enum_tokens_tointvec})
 
             # Unscale prediction outcomes
             if scale_output:
@@ -1215,8 +1224,9 @@ def main(data_smiles,
             logging.info("***Preparing the final out-of-sample prediction.***")
             logging.info("")
             
-            data_prop_clean = data_prop[predictions['Mean'].notna()]
-            predictions = predictions.dropna()
+            data_prop_clean = data_prop[predictions.notna().all(axis=1)]
+            data_err_clean = data_err[predictions.notna().all(axis=1)] if data_err is not None else None
+            predictions = predictions.dropna()       
 
             # Print the stats for the whole data
             final_scores = visutils.print_stats(trues=[data_prop_clean],
@@ -1231,7 +1241,7 @@ def main(data_smiles,
             # Final plot for prediction vs observation
             visutils.plot_fit(trues=[data_prop_clean.reshape(-1,1)],
                               preds=[predictions['Mean'].values],
-                              errs_true=[data_err],
+                              errs_true=[data_err_clean],
                               errs_pred=[predictions['Standard deviation'].values],
                               err_bars=err_bars,
                               save_dir=save_dir,

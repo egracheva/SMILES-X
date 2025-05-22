@@ -38,12 +38,15 @@ def set_gpuoptions(n_gpus = 1,
     Parameters
     ----------
     ngpus: int
-        Number of GPUs to be used. (Default: 1)
+        Number of GPUs to be used. 
+        (Default: 1)
     gpus_list: list, optional
-        List of GPU IDs to be used, e.g. [0, 1, 2]. If `gpus_list` and `ngpus` 
-        are both provided, `gpus_list` prevails. (Default: None)
+        List of GPU IDs to be used, e.g. [0, 1, 2]. If `gpus_list` and `n_gpus` 
+        are both provided, `gpus_list` prevails. 
+        (Default: None)
     gpus_debug: bool
-        Print out the GPUs ongoing usage. (Default: False)
+        Print out the GPUs ongoing usage. 
+        (Default: False)
     print_fn: {logging.info, print}
         Print out function. Either logging.info or print options are accepted.
         (Default: logging.info)
@@ -106,6 +109,91 @@ def set_gpuoptions(n_gpus = 1,
 #         print_fn("No GPU is detected in the system. SMILES-X needs at least one GPU to proceed.")
 #         raise StopExecution
 ##
+
+
+# def set_gpuoptions(n_gpus=1,
+#                    gpus_list=None,
+#                    gpus_debug=False,
+#                    print_fn=logging.info):
+#     """Setup GPU usage and memory growth.
+    
+#     Parameters
+#     ----------
+#     n_gpus: int
+#         Number of GPUs to be used. 
+#         (Default: 1)
+#     gpus_list: list, optional
+#         List of GPU IDs to be used, e.g., [0, 1, 2]. If `gpus_list` and `n_gpus` 
+#         are both provided, `gpus_list` prevails. 
+#         (Default: None)
+#     gpus_debug: bool
+#         Print out the GPUs' ongoing usage. 
+#         (Default: False)
+#     print_fn: {logging.info, print}
+#         Print out function. Either logging.info or print options are accepted.
+#         (Default: logging.info)
+
+#     Returns
+#     -------
+#     strategy:
+#         Memory growth strategy.
+#     logical_gpus: list
+#         List of logical GPUs.
+#     """
+    
+#     # Set device placement logging
+#     tf.debugging.set_log_device_placement(gpus_debug)
+    
+#     # Determine which GPUs to use
+#     if gpus_list is not None:
+#         gpu_ids = [int(iid) for iid in gpus_list]
+#     elif n_gpus > 0:
+#         gpu_ids = [int(iid) for iid in range(n_gpus)]
+#     else:
+#         print_fn("Number of GPUs to be used is set to 0. Proceeding with CPU.")
+#         strategy = tf.distribute.OneDeviceStrategy(device="/cpu:0")
+#         devices = tf.config.list_logical_devices('CPU')
+#         return strategy, devices
+
+#     # List all physical GPUs
+#     gpus = tf.config.list_physical_devices('GPU')
+#     devices = None  # Ensure 'devices' is always initialized
+
+#     if gpus:
+#         try:
+#             # Select only the requested GPUs
+#             gpus = [gpus[i] for i in gpu_ids]
+#             # Check if GPUs have already been configured
+#             if not tf.config.experimental.list_logical_devices('GPU'):
+#                 # Enable memory growth to prevent TensorFlow from allocating all GPU memory
+#                 for gpu in gpus:
+#                     tf.config.experimental.set_memory_growth(gpu, True)
+#                 tf.config.set_visible_devices(gpus, 'GPU')
+            
+#             logical_gpus = tf.config.list_logical_devices('GPU')
+#             devices = logical_gpus
+#             print_fn(f"{len(gpus)} Physical GPU(s), {len(logical_gpus)} Logical GPU(s) detected and configured.")
+
+#             # Choose strategy based on number of GPUs
+#             if len(logical_gpus) > 1:
+#                 strategy = tf.distribute.MirroredStrategy()
+#             else:
+#                 strategy = tf.distribute.OneDeviceStrategy(device="/gpu:0")
+
+#             print_fn(f'{strategy.num_replicas_in_sync} GPU device(s) will be used.')
+#             return strategy, logical_gpus
+
+#         except RuntimeError as e:
+#             print_fn(f"RuntimeError during GPU setup: {e}")
+#             print_fn("Falling back to CPU.")
+
+#     # Fallback to CPU if no GPU is detected or if setup fails
+#     if devices is None:
+#         devices = tf.config.list_logical_devices('CPU')
+#     strategy = tf.distribute.OneDeviceStrategy(device="/cpu:0")
+#     print_fn("No GPU is detected in the system or GPU setup failed. Proceeding with CPU.")
+#     return strategy, devices
+
 
 def log_setup(save_dir, name, verbose):
     """Setting up the logging format and files.

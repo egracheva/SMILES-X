@@ -20,7 +20,7 @@ from tensorflow.keras import metrics
 from tensorflow.keras import backend as K
 from tensorflow.keras.optimizers import Adam, SGD
 
-from SMILESX import utils, augm, token, model, trainutils
+from SMILESX import utils, augm, token, model, trainutils, visutils
 
 def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_length, check_smiles, augmentation, data_skew, hyper_bounds, hyper_opt, dense_depth, bo_rounds, bo_epochs, bo_runs, bayopt_vis, window_size, strategy, model_type, output_n_nodes, scale_output, pretrained_model=None):
     '''Bayesian optimization of hyperparameters.
@@ -296,7 +296,7 @@ def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_le
             histories_val = np.array(histories_val)
             
             # Display learning curves
-            bo_curves(histories_train, histories_val, histories_val_avg)
+            visutils.bo_curves(histories_train, histories_val, histories_val_avg)
 
         return score_valid
 

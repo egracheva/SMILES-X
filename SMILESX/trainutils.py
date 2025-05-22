@@ -75,6 +75,16 @@ class DataSequence(Sequence):
         self.iepoch += 1
         
     def __len__(self):
+#         length = tf.cast(
+#                     tf.math.ceil(
+#                         tf.math.divide_no_nan(
+#                             tf.constant(len(self.smiles), dtype=tf.float32),
+#                             tf.constant(self.batch_size, dtype=tf.float32)
+#                         )
+#                     ),
+#                     tf.int32
+#                 )
+#         return int(length.numpy())
         return int(np.ceil(len(self.smiles) / float(self.batch_size)))
 
     def __getitem__(self, idx):
@@ -259,8 +269,8 @@ class StepDecay():
         self.finalAlpha = finalAlpha
         self.gamma = gamma
         self.epochs = epochs
-        self.beta = (np.log(self.finalAlpha) - np.log(self.initAlpha)) / np.log(self.gamma)
-        self.dropEvery = self.epochs / self.beta
+        self.beta = tf.math.divide_no_nan(np.log(self.finalAlpha) - np.log(self.initAlpha), np.log(self.gamma))
+        self.dropEvery = tf.math.divide_no_nan(self.epochs, self.beta)
 
     def __call__(self, epoch):
         # compute the learning rate for the current epoch
@@ -282,7 +292,8 @@ class CosineAnneal(Callback):
     def __call__(self, epoch):
         # compute the learning rate for the current epoch        
         step = min(epoch, self.epochs)
-        cosine_decay = 0.5 * (1 + np.cos(np.pi * step / self.epochs))
+        
+        cosine_decay = 0.5 * (1 + np.cos(np.pi * tf.math.divide_no_nan(step, self.epochs)))
         decayed = (1 - alpha) * cosine_decay + self.final_learning_rate
         alpha = self.initial_learning_rate * decayed
         # return the learning rate
@@ -312,16 +323,17 @@ class LoggingCallback(Callback):
 ##
 
 
-class RunningAverageLoss(tf.keras.callbacks.Callback):
-    def __init__(self, window_size=5, model_type='regression', data_skew=False, save_best_model=True):
+class RunningAverageLoss(Callback):
+    def __init__(self, window_size=5, warm_up=10, model_type='regression', data_skew=False, save_best_model=True):
         super(RunningAverageLoss, self).__init__()
+        self.warm_up = warm_up
         self.window_size = window_size
-        self.model_type = model_type,
-        self.data_skew = data_skew,
+        self.model_type = model_type
+        self.data_skew = data_skew
         self.train_loss_history = []
         self.val_loss_history = []
         self.running_avg_val_loss = []
-        self.best_val_loss = float('inf')
+        self.best_loss = float('inf')
         self.save_best_model = save_best_model
         self.best_weights = None
 
@@ -329,20 +341,19 @@ class RunningAverageLoss(tf.keras.callbacks.Callback):
         # Store losses
         # Regression
         if self.model_type=='regression':
-            inverse = 1
-            train_loss_name = 'loss'
-            val_loss_name = 'val_loss'
+            self.inverse = 1
+            train_loss_name = 'mean_squared_error'
+            val_loss_name = 'val_mean_squared_error'
 
         # Classification (skewed and unskewed cases)
         else:
-            inverse = -1
+            self.inverse = -1
             if self.data_skew:
                 train_loss_name = 'precision_at_recall'
                 val_loss_name = 'val_precision_at_recall'
             else:
                 train_loss_name = 'auc'
                 val_loss_name = 'val_auc'
-
         train_loss = logs.get(train_loss_name)
         val_loss = logs.get(val_loss_name)
 
@@ -354,14 +365,18 @@ class RunningAverageLoss(tf.keras.callbacks.Callback):
             # Calculate running average
             if len(self.val_loss_history) > self.window_size:
                 self.val_loss_history.pop(0)
-            running_avg = sum(self.val_loss_history[-self.window_size:]) / len(self.val_loss_history[-self.window_size:])
+            
+            running_avg = tf.math.divide_no_nan(sum(self.val_loss_history[-self.window_size:]), 
+                                                len(self.val_loss_history[-self.window_size:]))
             self.running_avg_val_loss.append(running_avg)
-
-            # Check if current running average is the best
-            if running_avg < self.best_val_loss:
-                self.best_val_loss = running_avg
-                if self.save_best_model:
-                    self.best_weights = self.model.get_weights()
+            
+            # Only update the average loss after sufficient number of epochs passed
+            if len(self.val_loss_history) >= self.warm_up:
+                # Check if current running average is the best
+                if np.less(self.inverse*running_avg, self.inverse*self.best_loss):
+                    self.best_loss = running_avg
+                    if self.save_best_model:
+                        self.best_weights = self.model.get_weights()
 
     def on_train_end(self, logs=None):
         if self.save_best_model and self.best_weights is not None:
@@ -448,7 +463,8 @@ class IgnoreBeginningSaveBest(Callback):
         # Calculate running average
         if len(self.val_loss_history) > self.window_size:
             self.val_loss_history.pop(0)
-        running_avg = sum(self.val_loss_history[-self.window_size:]) / self.window_size
+        running_avg = tf.math.divide_no_nan(sum(self.val_loss_history[-self.window_size:]), 
+                                            len(self.val_loss_history[-self.window_size:]))
         self.running_avg_val_loss.append(running_avg)
 
         # Start saving only starting from a certain epoch
@@ -586,9 +602,9 @@ class LM_DataSequence(Sequence):
             return batch_x
 ##
 
-## Custom metric 
-class CxUxN(object):
-    """Implement CxUxN score calculation during training.
+
+class CUN(Callback):
+    """Computes custom Correctness-Uniquness-Novelty score during training.
 
     Parameters
     ----------
@@ -600,73 +616,33 @@ class CxUxN(object):
         List of tokens
     gen_max_length: int
         Maximum length of the generated SMILES
-    gpus: list
-        List of GPUs to use
-    model_init: keras model
-        Model to use for generation
     n_generate: int
         Number of SMILES to generate
     warm_up: int
         Number of epochs to wait before to start generation
     batch_size: int
         Batch size
-    print_fcn: function
-        Function to use for printing
-    model_dir: str
-        Path to the directory where the model is saved.
-    run: int
-        Number of the run
-    results_dir: str
-        Path to the directory where the results are saved.
+    patience: int
+        Used for early stopping. Patience is the number of epochs before stopping training when 
+        the validation error has stopped improving. 
     verbose: bool
         Whether to print the evaluation of a generation
 
     Returns
     -------
     Evaluation of the generation through the CUN score.
-    Plots CUN score learning curve.
     """
     
-    def __init__(self, init_data, data_name, vocab, gen_max_length, gpus, model_init, n_generate = 1000, warm_up = 0, batch_size = 128, print_fcn = print, model_dir = None, run = 0, results_dir = None, verbose = False):
+    def __init__(self, init_data, filepath, gen_tokens, gen_max_length, n_generate = 1000, warm_up = 0, batch_size = 128, patience = 25, verbose = False):
         self.init_data_set = set(init_data)
-        self.data_name = data_name
-        self.gen_tokens = vocab
+        self.filepath = filepath
+        self.gen_tokens = gen_tokens
         self.gen_max_length = gen_max_length
-        self.gpus = gpus
-        self.model_init = model_init
         self.n_generate = n_generate
         self.warm_up = warm_up
         self.batch_size = batch_size
-        self.print_fcn = print_fcn
-        self.model_dir = model_dir
-        self.run = run
-        self.results_dir = results_dir
         self.verbose = verbose
-        
-        # tokens to integers and vice versa
-        self.vocab_size = len(self.gen_tokens)
-        token_to_int = token.get_tokentoint(self.gen_tokens)
-        self.int_to_token = token.get_inttotoken(self.gen_tokens)
-        
-        self.pad_token_int = token_to_int['pad']
-        self.pre_token_int = token_to_int[' ']
-        self.suf_token_int = token_to_int[' ']
-        
-        # model loading on CPU
-        lstmunits = self.model_init.layers[2].output_shape[-1]//2
-        tdenseunits = self.model_init.layers[3].output_shape[-1]
-        embedding = self.model_init.layers[1].output_shape[-1]
-        with tf.device(self.gpus[-1].name):
-            K.clear_session()
-            # Model's architecture for generation
-            self.gen_model = model.LSTMAttModel.create(input_tokens = self.gen_max_length, 
-                                                       vocab_size = self.vocab_size, 
-                                                       embed_units = embedding, 
-                                                       lstm_units= lstmunits, 
-                                                       tdense_units = tdenseunits, 
-                                                       dense_depth=0, 
-                                                       model_type = 'multiclass_classification', 
-                                                       output_n_nodes = self.vocab_size)
+        self.patience = patience
         
         # Correctness, Uniqueness, Novelty, CxUxN score lists
         self.cor_list = []
@@ -674,50 +650,54 @@ class CxUxN(object):
         self.novel_list = []
         self.cun_list = []
         
-        # CxUxN score max and related epoch
-        self.cun_max = 0
+        # Early stopping implementation
+        self.wait = 0
         self.best_epoch = 0
+        self.best_cun_val = 0
+
+    def on_epoch_end(self, epoch, logs=None):
+
+        # tokens to integers and vice versa
+        vocab_size = len(self.gen_tokens)
+        token_to_int = token.get_tokentoint(self.gen_tokens)
+        self.int_to_token = token.get_inttotoken(self.gen_tokens)
         
-    ## CxUxN score evaluation
-    def evaluation(self, epoch):
+        self.pad_token_int = token_to_int['pad']
+        self.pre_token_int = token_to_int[' ']
+        self.suf_token_int = token_to_int[' ']
+
         if epoch >= self.warm_up:
-            start_time = time.time()
-
-            self.gen_model.load_weights('{}/{}_Model_Run_{}_Epoch_{:02d}.hdf5'.format(self.model_dir, self.data_name, self.run, epoch+1))
-
             # array of temporary new SMILES
-            starter_row = np.array([self.pad_token_int]*(self.gen_max_length-1)+[self.pre_token_int])
+            starter_row = np.array([self.pad_token_int]*self.gen_max_length+[self.pre_token_int])
             new_smiles_tmp = np.copy(starter_row)
             new_smiles_tmp = np.tile(new_smiles_tmp, (self.n_generate, 1))
             # array of new SMILES to return
-            new_smiles = np.empty(shape=(0,self.gen_max_length), dtype=np.int16)
+            new_smiles = np.empty(shape=(0,self.gen_max_length+1), dtype=np.int16)
             new_smiles_shape = new_smiles.shape[0]
-            ##
 
             # Generate new SMILES
             time_range = 0
-
-            #while time_range < 60: 
             while new_smiles_shape < self.n_generate:
-                # shape: (batch_size, vocab_size) 
-                prior = self.gen_model.predict(DataSequence(smiles=new_smiles_tmp, 
+                start_time = time.time()
+                prior = self.model.predict(DataSequence(smiles=new_smiles_tmp, 
                                                             extra=None,
                                                             props=None,
-                                                            batch_size=self.batch_size), 
-                                               max_queue_size = self.batch_size).astype('float64')
+                                                            batch_size=self.batch_size),
+                                           max_queue_size = self.batch_size).astype('float64')
                 # extract a substitution to the prior
-                top_k = self.vocab_size
+                top_k = vocab_size
                 sub_prior = np.sort(prior)[:,-top_k:]
                 # extract top_k integered tokens with highest probability of occurence
                 sub_prior_tokens = np.argsort(prior)[:,-top_k:]
 
-                # shape: (n_generate,)
                 new_tokens = genutils.sample(sub_prior)
                 new_tokens = sub_prior_tokens[new_tokens]
-                new_smiles_tmp[:,:(self.gen_max_length-1)] = new_smiles_tmp[:,1:]
+                new_smiles_tmp[:,:self.gen_max_length] = new_smiles_tmp[:,1:]
                 new_smiles_tmp[:,-1] = new_tokens
+
                 finished_smiles_idx_tmp = np.where(new_tokens == self.suf_token_int)[0].tolist()
                 unfinished_smiles_idx_tmp = np.where(new_tokens != self.suf_token_int)[0].tolist()
+
                 if len(finished_smiles_idx_tmp) != 0:
                     new_smiles = np.append(new_smiles, 
                                            new_smiles_tmp[finished_smiles_idx_tmp], 
@@ -728,7 +708,6 @@ class CxUxN(object):
                                                        (len(finished_smiles_idx_tmp), 1)), 
                                                axis = 0)
                     new_smiles_shape = new_smiles.shape[0]
-
                 time_range = time.time() - start_time
 
             new_smiles_list = list()
@@ -750,18 +729,12 @@ class CxUxN(object):
                 unique_smiles = np.unique(new_smiles_list)
                 uniqueness = unique_smiles.shape[0]/float(new_smiles_list_len)
                 novelty = len(set(unique_smiles).difference(self.init_data_set))/unique_smiles.shape[0]
-
                 cun_val = (correctness * uniqueness * novelty)
             else:
                 correctness = 0
                 uniqueness = 0
                 novelty = 0
                 cun_val = 0
-
-            # Keep the best CxUxN score with the related epoch in memory
-            if cun_val > self.cun_max:
-                self.cun_max = cun_val
-                self.best_epoch = epoch
 
             # Update CxUxN scores list
             self.cor_list.append(correctness)
@@ -771,30 +744,39 @@ class CxUxN(object):
 
             if self.verbose:
                 verbose_time_range = time.time() - start_time
-                self.print_fcn("{{Epoch: {}}} {} generations, {} valid generations, CxUxN score: {:.2f} %, Duration: {:.3f} secs".format(epoch, 
-                                                                                                                                         new_smiles_shape, 
-                                                                                                                                         new_smiles_list_len, 
-                                                                                                                                         cun_val*100., 
-                                                                                                                                         verbose_time_range))
-            
-    def on_evaluation_end(self):
-        # Save best weights
-        shutil.copy('{}/{}_Model_Run_{}_Epoch_{:02d}.hdf5'.format(self.model_dir, self.data_name, self.run, self.best_epoch+1), 
-                    '{}/{}_Model_Run_{}_Best_Epoch.hdf5'.format(self.model_dir, self.data_name, self.run))
-        self.print_fcn("\nBest CxUxN score @ Epoch #{}\n".format(self.best_epoch))
-        # plot scores history
-        if self.model_dir is not None:
-            plt.plot(self.cor_list)
-            plt.plot(self.uniq_list)
-            plt.plot(self.novel_list)
-            plt.plot(self.cun_list)
-            plt.legend(['Correctness','Uniqueness','Novelty','CxUxN'], loc='lower right')
-            plt.ylabel('Score')
-            plt.title('')
-            plt.xlabel('Epoch')
-            plt.savefig('{}/{}_Model_Run_{}_History_CxUxN_score.png'.format(self.results_dir, self.data_name, self.run), bbox_inches='tight')
-            plt.close()
+                logging.info("{{Epoch: {}}} {} generations, {} valid generations, CxUxN score: {:.2f} %, Duration: {:.3f} secs".format(epoch, new_smiles_shape, new_smiles_list_len, cun_val*100., verbose_time_range))
+
+            # Early stopping implementation
+            # Check if CxUxN score improved, save the model with the best CxUxN score
+            if cun_val > self.best_cun_val:
+                self.best_cun_val = cun_val
+                self.best_epoch = epoch
+                self.best_weights = self.model.get_weights()  # Store the best weights
+                self.model.save(self.filepath)
+                
+                self.wait = 0  # Reset the patience counter
+            else:
+                self.wait += 1
+                if self.wait >= self.patience:
+                    print(f"\nEarly stopping at epoch {epoch + 1}")
+                    self.model.stop_training = True
+                    if self.best_weights is not None:
+                        self.model.set_weights(self.best_weights)  # Revert to the best weights
+
+    def on_train_end(self, logs=None):
+        # Save the model with the best weights if more apochs has spun than requested to ignore
+        if self.best_weights is not None:
+            # Save current weights
+            self.curr_weights = self.model.get_weights()
+
+        logging.info("")
+        logging.info("The best CUN score of {:.2f} is achieved at epoch #{}"\
+                     .format(self.best_cun_val, self.best_epoch))
+        logging.info("")
+        logging.info("Saving the best model to {}"\
+                     .format(self.filepath))
 ##
+
 
 class FocalLossCustom(tf.keras.losses.Loss):
     
