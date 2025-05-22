@@ -1,6 +1,7 @@
 import logging
-import pandas as pd
 import numpy as np
+import pandas as pd
+import seaborn as sns
 
 from typing import Optional
 from typing import List
@@ -19,11 +20,9 @@ from SMILESX import utils
 logger = logging.getLogger()
 
 # Learning curve plotting
-def learning_curve(train_loss, val_loss, save_dir: str, data_name: str, ifold: int, run: int, model_type: str) -> None:
+def learning_curve(train_loss, val_loss, val_loss_avg, data_skew, save_dir: str, data_name: str, ifold: int, run: int, model_type: str) -> None:
 
     fig = plt.figure(figsize=(6.75, 5), dpi=200)
-
-#     plt.title('')
 
     ax = fig.add_subplot(111)
 
@@ -35,12 +34,16 @@ def learning_curve(train_loss, val_loss, save_dir: str, data_name: str, ifold: i
     if model_type == 'regression':
         plt.ylabel('Loss (RMSE, scaled)', fontsize=18)
     else:
-        plt.ylabel('Loss (cross-entropy)', fontsize=18)
+        if data_skew:
+            plt.ylabel('AUC-PRC', fontsize=18)
+        else:
+            plt.ylabel('AUC-ROC', fontsize=18)
     plt.xlabel('Epoch', fontsize=18)
     
-    ax.plot(train_loss, color='#3783ad')
+    ax.plot(train_loss, color='#3783AD')
     if val_loss is not None:
-        ax.plot(val_loss, color='#a3cee6')
+        ax.plot(val_loss, color='#F7A95E')
+        ax.plot(val_loss_avg, color='#E06D00')
 
     for item in ([ax.title, ax.xaxis.label, ax.yaxis.label] + ax.get_xticklabels() + ax.get_yticklabels()):
         item.set_fontsize(14)
@@ -68,16 +71,62 @@ def learning_curve(train_loss, val_loss, save_dir: str, data_name: str, ifold: i
                    labelright=True,
                    left=True,
                    labelleft=True)
-    if ifold is not None: 
-        ax.legend(['Train', 'Validation'], loc='upper right', fontsize=14)
+    
+    if ifold is not None:
+        if model_type == 'regression':
+            ax.legend(['Train', 'Validation', 'Running Average Validation'], loc='upper right', fontsize=12)
+        else:
+            ax.legend(['Train', 'Validation', 'Running Average Validation'], loc='upper left', fontsize=12)
         plt.savefig('{}/{}_LearningCurve_Fold_{}_Run_{}.png'\
                     .format(save_dir, data_name, ifold, run), bbox_inches='tight')
     else:
-        ax.legend(['Train'], loc='upper right', fontsize=14)
+        if model_type == 'regression':
+            ax.legend(['Train'], loc='upper right', fontsize=12)
+        else:
+            ax.legend(['Train'], loc='upper left', fontsize=12)
         plt.savefig('{}/{}_LearningCurve_Run_{}.png'\
                 .format(save_dir, data_name, run), bbox_inches='tight')
     plt.close()
 ##
+   
+
+def lm_cun_curve(cor_list, uniq_list, novel_list, cun_list, output_dir, data_name, run):
+    fig, ax = plt.subplots(figsize=(6.75, 5), dpi=200)
+    
+    x = range(1, len(cun_list)+1)
+    sns.lineplot(x=x,
+                 y=cor_list,
+                 ax=ax,
+                 label='Correctness',
+                 color='#B3DED6',
+                 linewidth=1.5)
+    sns.lineplot(x=x,
+                 y=uniq_list,
+                 ax=ax,
+                 label='Uniqueness',
+                 color='#AB56A6',
+                 linewidth=1.5)
+    sns.lineplot(x=x,
+                 y=novel_list,
+                 ax=ax,
+                 label='Novelty',
+                 color='#FFA114',
+                 linewidth=1.5)
+    sns.lineplot(x=x,
+                 y=100*np.array(cun_list),
+                 ax=ax,
+                 label='CxUxN',
+                 color='#3B3939',
+                 linewidth=1.5)
+    
+    ax.set_xlabel('Epochs', fontsize=14)
+    ax.set_ylabel('Score', fontsize=14)
+    
+    plt.legend()
+    plt.savefig('{}/{}_Model_Run_{}_History_CxUxN_score.png'.format(output_dir, data_name, run), bbox_inches='tight')
+    plt.show()
+##
+
 
 # Metric curve plotting for LM
 def lm_metric_curve(train_metric, imetrics, imetrics_p, save_dir: str, data_name: str, run: int) -> None:
@@ -125,6 +174,61 @@ def lm_metric_curve(train_metric, imetrics, imetrics_p, save_dir: str, data_name
             .format(save_dir, data_name, run), bbox_inches='tight')
     plt.close()
 ##
+
+
+def bo_curves(histories_train, histories_val, histories_val_avg):
+    fig, ax = plt.subplots(figsize=(5, 3))
+
+    x = range(1, histories_train.shape[1]+1)
+    sns.lineplot(x=x,
+                 y=histories_train.mean(axis=0),
+                 ax=ax,
+                 label='Training Loss',
+                 color='#3783AD',
+                 linewidth=2.5)
+    sns.lineplot(x=x,
+                 y=histories_val.mean(axis=0),
+                 ax=ax,
+                 label='Validation Loss',
+                 color='#F7A95E',
+                 linewidth=2.5)
+
+    sns.lineplot(x=x[int(histories_train.shape[1]/2)-1:],
+                 y=histories_val_avg.mean(axis=0)[int(histories_train.shape[1]/2)-1:],
+                 ax=ax,
+                 label='Running Average Validation Loss',
+                 color='#E06D00',
+                 linewidth=2.5)
+
+    sns.lineplot(x=x[:int(histories_train.shape[1]/2)],
+                 y=histories_val_avg.mean(axis=0)[:int(histories_train.shape[1]/2)],
+                 ax=ax,
+                 color='#E06D00',
+                 linewidth=2.5,
+                 dashes=(2, 2))
+
+    plt.fill_between(x,
+                     histories_train.mean(axis=0) - histories_train.std(axis=0),
+                     histories_train.mean(axis=0) + histories_train.std(axis=0),
+                     color='#3783AD', alpha=0.2, linewidth=0.0)
+
+    plt.fill_between(x,
+                     histories_val.mean(axis=0) - histories_val.std(axis=0),
+                     histories_val.mean(axis=0) + histories_val.std(axis=0),
+                     color='#F7A95E', alpha=0.2, linewidth=0.0)
+
+    plt.fill_between(x,
+                     histories_val_avg.mean(axis=0) - histories_val_avg.std(axis=0),
+                     histories_val_avg.mean(axis=0) + histories_val_avg.std(axis=0),
+                     color='#E06D00', alpha=0.2, linewidth=0.0)
+
+    ax.set_xlabel('Epochs', fontsize=14)
+    ax.set_ylabel('Loss', fontsize=14)
+
+    plt.legend()
+    plt.show()
+##
+
 
 ## Compute diverse scores to quantify model's performance on classification tasks
 def classification_metrics(y_true, y_pred, model_type, prec, average=None, labels=None):

@@ -10,16 +10,19 @@ import datetime
 
 import numpy as np
 import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 import GPy, GPyOpt
 
+import tensorflow as tf
 from tensorflow.keras import metrics
 from tensorflow.keras import backend as K
 from tensorflow.keras.optimizers import Adam, SGD
 
-from SMILESX import utils, augm, token, model, trainutils
+from SMILESX import utils, augm, token, model, trainutils, visutils
 
-def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_length, check_smiles, augmentation, hyper_bounds, hyper_opt, dense_depth, bo_rounds, bo_epochs, bo_runs, strategy, model_type, output_n_nodes, scale_output, pretrained_model=None):
+def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_length, check_smiles, augmentation, data_skew, hyper_bounds, hyper_opt, dense_depth, bo_rounds, bo_epochs, bo_runs, bayopt_vis, window_size, strategy, model_type, output_n_nodes, scale_output, pretrained_model=None):
     '''Bayesian optimization of hyperparameters.
 
     Parameters
@@ -40,6 +43,8 @@ def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_le
         Whether to check SMILES validity with RDKit.
     augmentation: bool
         Whether to perform data augmentation during bayesian optimization process.
+    data_skew: bool
+        Whether the classes in the input data are imbalanced.
     hyper_bounds: dict
         A dictionary of bounds {"param":[bounds]}, where parameter `"param"` can be
         embedding, LSTM, time-distributed dense layer units, batch size or learning
@@ -57,6 +62,10 @@ def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_le
         Number of epochs required for training within the optimization frame.
     bo_runs: int
         Number of training repetitions with random train/val split.
+    bayopt_vis: bool
+        Whether to show the learning curves for each tried hyperparameters combinations
+    window_size: int
+        Window size for running average.
     strategy:
         GPU memory growth strategy.
     model_type: str
@@ -129,6 +138,9 @@ def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_le
                 hyper_bo[key] = params.pop()
 
         score_valids = []
+        histories_train = []
+        histories_val = []
+        histories_val_avg = []
         for irun in range(bo_runs):
             # Preparing the data for optimization
             # Random train/val splitting for every run to assure better generalizability of the optimized parameters
@@ -205,25 +217,46 @@ def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_le
                                                           dense_depth=dense_depth, 
                                                           model_type=model_type, 
                                                           output_n_nodes=output_n_nodes)
-            
+
             if model_type == 'regression':
                 model_loss = 'mse'
                 model_metrics = [metrics.mae, metrics.mse]
                 hist_val_name = 'val_mean_squared_error'
-            elif model_type == 'binary_classification':
-                model_loss = 'binary_crossentropy'
-                model_metrics = ['accuracy']
-                hist_val_name = 'val_loss'
-            elif model_type == 'multiclass_classification':
-                model_loss = 'sparse_categorical_crossentropy'
-                model_metrics = ['accuracy']
-                hist_val_name = 'val_loss'
-            
+                hist_train_name = 'mean_squared_error'
+            else:
+                if model_type == 'binary_classification':
+                    model_loss = 'binary_crossentropy'
+                    model_metrics = ['accuracy']
+                elif model_type == 'multiclass_classification':
+                    model_loss = 'sparse_categorical_crossentropy'
+                    model_metrics = ['accuracy']
+
+                if data_skew:
+                    hist_train_name = 'precision_at_recall'
+                    hist_val_name = 'val_precision_at_recall'
+                    with strategy.scope():
+                        model_metrics = [tf.keras.metrics.PrecisionAtRecall(0.5)]
+                else:
+                    hist_train_name = 'auc'
+                    hist_val_name = 'val_auc'
+                    with strategy.scope():
+                        model_metrics = [tf.keras.metrics.AUC()]
+
             with strategy.scope():
                 batch_size = int(hyper_bo['Batch size']) * strategy.num_replicas_in_sync
                 batch_size_val = min(len(x_train_enum_tokens_tointvec), batch_size)
-                custom_adam = Adam(lr=math.pow(10,-float(hyper_bo['Learning rate'])))
-                model_opt.compile(loss=model_loss, optimizer=custom_adam, metrics=model_metrics)
+                custom_adam = Adam(learning_rate=math.pow(10,-float(hyper_bo['Learning rate'])))
+                
+                running_loss = trainutils.RunningAverageLoss(window_size=window_size, 
+                                                             model_type=model_type, 
+                                                             warm_up=int(bo_epochs/2), 
+                                                             data_skew=data_skew)
+                callbacks_list = [running_loss]
+                
+                if data_skew:
+                    model_opt.compile(loss=trainutils.FocalLossCustom(alpha=0.2, gamma=2.0), optimizer=custom_adam, metrics=model_metrics)
+                else:
+                    model_opt.compile(loss=model_loss, optimizer=custom_adam, metrics=model_metrics)
 
                 history = model_opt.fit_generator(generator=\
                                                   trainutils.DataSequence(x_train_enum_tokens_tointvec,
@@ -236,25 +269,36 @@ def bayopt_run(smiles, prop, extra, train_val_idx, smiles_concat, tokens, max_le
                                                                           y_valid_enum,
                                                                           batch_size_val),
                                                   epochs=bo_epochs,
+                                                  callbacks=callbacks_list,
                                                   shuffle=True,
                                                   initial_epoch=0,
                                                   verbose=0)
+                histories_train.append(history.history[hist_train_name])
+                histories_val.append(history.history[hist_val_name])
+                histories_val_avg.append(running_loss.running_avg_val_loss)
 
-            # Skip the first half of epochs during evaluation
-            # Ignore the noisy burn-in period of training
-            best_epoch = np.argmin(history.history['val_loss'][int(bo_epochs//2):])
-            score_valid = history.history[hist_val_name][best_epoch + int(bo_epochs//2)]
+        # Skip the first half of epochs during evaluation
+        # Ignore the noisy burn-in period of training
+        # Minimize the metric for regression problems and maximize it for classification
 
-            if math.isnan(score_valid): # treat diverging architectures (rare event)
-                score_valid = math.inf
-            score_valids.append(score_valid)
+        histories_val_avg = np.array(histories_val_avg)
+        mean_histories_val_avg = running_loss.inverse*histories_val_avg.mean(axis=0)
+        
+        score_valid = np.min(running_loss.inverse*mean_histories_val_avg)
 
-        logging.info('Average best validation score: {0:0.4f}'.format(np.mean(score_valids)))
+        if math.isnan(score_valid): # treat diverging architectures (rare event)
+            score_valid = math.inf
 
-        # Return the mean of the validation scores
-        score_valids_mean = np.mean(score_valids)
+        logging.info('Average best validation score: {0:0.4f}'.format(score_valid))
+        
+        if bayopt_vis:
+            histories_train = np.array(histories_train)
+            histories_val = np.array(histories_val)
+            
+            # Display learning curves
+            visutils.bo_curves(histories_train, histories_val, histories_val_avg)
 
-        return score_valids_mean
+        return score_valid
 
     start_bo = time.time()
 

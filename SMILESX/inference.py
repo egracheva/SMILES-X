@@ -86,17 +86,16 @@ def infer(model, data_smiles, data_extra=None, augment=False, check_smiles: bool
     logging.info("Vocabulary size: {}".format(len(model.tokens)))
     logging.info("Maximum length of tokenized SMILES: {} tokens.\n".format(model.max_length))
 
-    data_smiles = np.array(data_smiles)
     if model.extra:
         data_extra = np.array(data_extra)
     # Checking and/or augmenting the SMILES if requested
 
-    smiles_enum, extra_enum, _, _, smiles_enum_card, _ = augm.augmentation(data_smiles=data_smiles,
-                                                                     indices=[i for i in range(len(data_smiles))],
-                                                                     data_extra=data_extra,
-                                                                     data_prop=None,
-                                                                     check_smiles=check_smiles,
-                                                                     augment=augment)
+    smiles_enum, extra_enum, _, _, smiles_enum_card, _ = augm.augmentation(data_smiles=np.array(data_smiles),
+                                                                           indices=[i for i in range(len(data_smiles))],
+                                                                           data_extra=data_extra,
+                                                                           data_prop=None,
+                                                                           check_smiles=check_smiles,
+                                                                           augment=augment)
 
     # Concatenate multiple SMILES into one via 'j' joint
     if smiles_concat:
@@ -148,8 +147,7 @@ def infer(model, data_smiles, data_extra=None, augment=False, check_smiles: bool
         preds_mean = np.argmax(preds_mean, axis=1)
         preds_std = preds_std[np.arange(len(preds_std)), preds_mean.tolist()]
 
-    preds = pd.DataFrame()
-    preds['SMILES'] = pd.DataFrame(data_smiles)
+    preds = data_smiles
     preds['mean'] = preds_mean
     if model_type == 'binary_classification':
         preds['mean'] = (preds['mean'] > 0.5).astype("int8")

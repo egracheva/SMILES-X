@@ -127,8 +127,8 @@ def rotate_atoms(li, x):
 
     return (li[x%len(li):]+li[:x%len(li)])
 ##
-
-def generate_smiles(smiles, kekule = False, rotate = False):
+# Changed kekule from False to True to prevent aromatic notation
+def generate_smiles(smiles, kekule = True, rotate = False):
     """Generate SMILES list
 
     Parameters
@@ -172,7 +172,7 @@ def generate_smiles(smiles, kekule = False, rotate = False):
                             rot_mol = Chem.RenumberAtoms(mol, n_atoms_list_tmp)
                             mols.append(rot_mol)
                 else:
-                    canon = True
+                    canon = False # Changed here to prevent aromatic notation
             except:
                 mol = None
 

@@ -39,37 +39,47 @@ class Generation(object):
 
     Attributes
     ----------
-    data_name : str
-        dataset's name
+    gen_data_name : str
+        Dataset's name used for generative model training.
     g_run_number : int
-        number of the run to be considered for the generation model (Default: 0)
+        number of the run to be considered for the generation model.
+        (Default: 0)
     gen_augmentation : bool
-        SMILES's augmentation at generator training (Default: False)
+        SMILES's augmentation at generator training.
+        (Default: False)
     infer_augmentation : bool   
-        SMILES's augmentation at predictor training (Default: False)
+        SMILES's augmentation at predictor training.
+        (Default: False)
     infer_use_n_folds : int
-        number of folds to be considered for the predictor model. 
-        If put to None, all available folds are used for inference (Default: None)
+        Number of folds to be considered for the predictor model. 
+        If put to None, all available folds are used for inference.
+        (Default: None)
     infer_use_n_runs : int
-        number of runs to be considered for the predictor model. 
-        If put to None, all available runs are used for inference (Default: None)
+        Number of runs to be considered for the predictor model. 
+        If put to None, all available runs are used for inference.
+        (Default: None)
     indir : str 
-        directory of already trained prediction models (*.hdf5) and vocabulary (*.txt) (Default: './outputs')
+        Directory of already trained prediction models (*.hdf5) and vocabulary (*.txt).
+        (Default: './outputs')
     outdir : str
-        directory for outputs (plots + .txt files) -> 'Inference/'+'{}/{}/'.format(data_name,g_dir_temp) is then created (Default: './outputs')
+        Directory for outputs (plots + .txt files) -> 'Inference/'+'{}/{}/'.format(gen_data_name, g_dir_temp) is then created (Default: './outputs')
     n_gpus : int
-        number of GPUs to use (Default: 1)
+        Number of GPUs to use.
+        (Default: 1)
     gpus_list : list
-        list of GPUs to use (Default: None)
+        List of GPUs to use.
+        (Default: None)
     gpus_debug : bool
-        debug mode for GPUs (Default: False)
+        Debug mode for GPUs.
+        (Default: False)
     prop_names_list : list  
-        list of properties' names (Default: None)
+        List of properties' names.
+        (Default: None)
 
     Methods
     -------
     __init__(self,
-             data_name,
+             gen_data_name,
              g_run_number = 0,   
              gen_augmentation = False,
              infer_augmentation = False,
@@ -77,16 +87,16 @@ class Generation(object):
              infer_use_n_runs = None,
              indir = "./output/",
              outdir = "./output/",
-             vocab_name = 'vocab',
              n_gpus = 1,
              gpus_list = None,
              gpus_debug = False,
              prop_names_list = None)
+
     Initialize the class Generation with the given parameters (see Attributes). 
     '''
 
     def __init__(self, 
-                 data_name, 
+                 gen_data_name, 
                  g_run_number = 0, 
                  gen_augmentation = False, 
                  infer_augmentation = False, 
@@ -107,7 +117,7 @@ class Generation(object):
             raise utils.StopExecution
         ##
         
-        self.data_name = data_name
+        self.gen_data_name = gen_data_name
         self.g_run_number = g_run_number
         self.gen_augmentation = gen_augmentation
         self.infer_augmentation = infer_augmentation
@@ -122,18 +132,17 @@ class Generation(object):
             for iprop_name in self.prop_names_list:
                 infer_model_dir_tmp = '{}/{}/{}/Train/Models'.format(indir, iprop_name, 'Augm' if infer_augmentation else 'Can')
                 infer_model_dir_list.append(infer_model_dir_tmp)
+                
         
-        gen_input_dir = '{}/{}/{}/{}/Train'.format(indir, data_name, 'LM', 'Augm' if gen_augmentation else 'Can')
+        gen_input_dir = '{}/{}/{}/{}/Train'.format(indir, gen_data_name, 'LM', 'Augm' if gen_augmentation else 'Can')
         gen_model_dir = gen_input_dir + '/Models'
 
-        vocab_file = '{}/Other/{}_Vocabulary.txt'.format(gen_input_dir, data_name)
-        if not os.path.exists(vocab_file):
+        gen_vocab_file = '{}/Other/{}_Vocabulary.txt'.format(gen_input_dir, gen_data_name)
+        if not os.path.exists(gen_vocab_file):
             print("***Process of generation automatically aborted!***")
-            print("The {} file does not exist.\n".format(vocab_file))
+            print("The {} file does not exist.\n".format(gen_vocab_file))
             print("Please, train the generator first.\n")
             return
-
-        infer_input_dir = '{}/{}/{}/Train'.format(indir, data_name, 'Augm' if infer_augmentation else 'Can')
         
         if not os.path.exists(gen_model_dir):
             print("***Process of generation automatically aborted!***")
@@ -141,7 +150,7 @@ class Generation(object):
             print("Please, train the generator first.\n")
             return
 
-        gen_models = glob.glob(gen_model_dir + '/*_Best_Epoch.hdf5')
+        gen_models = glob.glob(gen_model_dir + '/*.hdf5')
         if len(gen_models) == 0:
             print("***Process of generation automatically aborted!***")
             print("The {} directory does not contain any best generator model with high CUN score.\n".format(gen_model_dir))
@@ -178,16 +187,16 @@ class Generation(object):
         if self.prop_names_list is not None:
             self.prop_names_list_len = len(self.prop_names_list)
             self.infer_model_list = list()
-            for iprop in range(self.prop_names_list_len):
-                infer_model_tmp = loadmodel.LoadModel(data_name = self.prop_names_list[iprop],
-                                                        augment = self.infer_augmentation, 
-                                                        use_n_folds = self.infer_use_n_folds,
-                                                        use_n_runs = self.infer_use_n_runs,
-                                                        outdir = indir,
-                                                        gpu_name = self.gpus,
-                                                        strategy = self.strategy, 
-                                                        log_verbose = False,
-                                                        return_attention = False)
+            for iprop, iprop_name in enumerate(self.prop_names_list):
+                infer_model_tmp = loadmodel.LoadModel(data_name=self.prop_names_list[iprop],
+                                                      augment=self.infer_augmentation, 
+                                                      use_n_folds=self.infer_use_n_folds,
+                                                      use_n_runs=self.infer_use_n_runs,
+                                                      outdir=indir,
+                                                      gpu_name=self.gpus,
+                                                      strategy=self.strategy, 
+                                                      log_verbose=False,
+                                                      return_attention=False)
                 self.infer_model_list.append(infer_model_tmp)
         else:
             self.prop_names_list_len = 0
@@ -196,20 +205,19 @@ class Generation(object):
         ##
             
         # Setting up the trained model for generation, the generator vocabulary, and the predictor for inference
-        
         # Tokens as a list
-        self.gen_tokens = token.get_vocab(vocab_file)
+        self.gen_tokens = token.get_vocab(gen_vocab_file)
         # Add 'pad', 'unk' tokens to the existing list
         self.gen_tokens.insert(0, 'unk')
         self.gen_tokens.insert(0, 'pad')
-        self.vocab_size = len(self.gen_tokens)
-        self.token_to_int = token.get_tokentoint(self.gen_tokens)
-        self.int_to_token = token.get_inttotoken(self.gen_tokens)
+        self.gen_vocab_size = len(self.gen_tokens)
+        self.gen_token_to_int = token.get_tokentoint(self.gen_tokens)
+        self.gen_int_to_token = token.get_inttotoken(self.gen_tokens)
         
         K.clear_session()
-        # mirror_strategy workaround for model loading
+        # Mirror_strategy workaround for generation model loading
         with tf.device(self.gpus[0].name): 
-            self.gen_model = load_model('{}/{}_Model_Run_{}_Best_Epoch.hdf5'.format(gen_model_dir, data_name, g_run_number), 
+            self.gen_model = load_model('{}/{}_Model_Run_{}.hdf5'.format(gen_model_dir, gen_data_name, g_run_number), 
                                         custom_objects={'SoftAttention': model.SoftAttention()})
         self.gen_max_length = self.gen_model.layers[0].output_shape[-1][1]
 
@@ -266,7 +274,7 @@ class Generation(object):
         plt.setp(markers, linewidth=1, marker='o', markersize=10, markeredgecolor = 'black', color = 'b')
         plt.setp(stemlines, color = 'k', linewidth=0.5, linestyle='-')
         plt.xticks(range(posterior.shape[1]), 
-                   [self.int_to_token[iitoken] for iitoken in int_tokens_list],
+                   [self.gen_int_to_token[iitoken] for iitoken in int_tokens_list],
                    fontsize = 9, 
                    rotation = 90)
         plt.yticks(fontsize = 20)
@@ -285,32 +293,45 @@ class Generation(object):
                  prop_gamma_list = None, 
                  prior_gamma = 1.):
         '''
-        Generate SMILES from the model.
+        Generate SMILES based on the available generative and predictive language models.
+        
         starter: str
-            String of tokens to start with (Default: None, i.e. random)
+            String of tokens to start with.
+            None stands for random initialization.
+            (Default: None)
         n_generate: int 
-            Number of SMILES to generate, must be a multiple of batch_size (Default: 1000)
+            Number of SMILES to generate, must be a multiple of batch_size.
+            (Default: 1000)
         top_k: int
-            Top k tokens to take into account for scoring (Default: None, i.e. no limit), must be > 0 and <= vocab_size (Default: None)
+            Top k tokens to take into account for scoring, must be > 0 and <= vocab_size.
+            None setting stands for 'no limit'.
+            (Default: None)
         diversity: floatDataSequence
-            Diversity (or temperature) controller during sampling, must be > 0 (Default: 1.)
+            Diversity (or temperature) controller during sampling, must be > 0.
+            (Default: 1.)
         batch_size: int
-            Number of smiles generated in parallel, must be a multiple of n_generate (Default: 128)
+            Number of smiles generated in parallel, must be a multiple of n_generate.
+            (Default: 128)
         target_sf: str
-            Target sampling function, either 'uniform' or 'gaussian' (Default: 'uniform')
+            Target sampling function, either 'uniform' or 'gaussian'.
+            (Default: 'uniform')
         bounds_list : list
-            list of properties' bounds (Default: None)
+            List of properties' bounds.
+            (Default: None)
         tolerance: float
-            Tolerance for the target sampling function (Default: 10)
+            Tolerance for the target sampling function.
+            (Default: 10)
         prop_gamma_list : list
-            list of properties' gamma (Default: None)
+            List of properties' gamma.
+            (Default: None)
         prior_gamma : float
-            gamma for the prior (Default: 1.)
+            Gamma for the prior.
+            (Default: 1.)
 
         Returns
         -------
         new_smiles_list: list
-            List of generated SMILES
+            List of generated SMILES.
         '''
 
         if self.prop_names_list is not None:
@@ -328,26 +349,28 @@ class Generation(object):
         else:
             print("No property to infer.\n")
 
-        # list of generated SMILES
-        pad_token_int = self.token_to_int['pad']
-        unk_token_int = self.token_to_int['unk']
-        pre_token_int = self.token_to_int[' ']
-        token_int_veto = [pad_token_int, unk_token_int, pre_token_int]
-        suf_token_int = self.token_to_int[' ']
-        gen_tokens_toint = [self.token_to_int[itoken] for itoken in self.gen_tokens]
-       
-        # control top_k according to vocab_size
+        # List of generated SMILES
+        gen_pad_token_int = self.gen_token_to_int['pad']
+#         gen_unk_token_int = self.gen_token_to_int['unk']
+        gen_pre_token_int = self.gen_token_to_int[' '] # SMILES starts with a ' '
+#         gen_token_int_veto = [gen_pad_token_int, gen_unk_token_int, gen_pre_token_int]
+        gen_suf_token_int = self.gen_token_to_int[' '] # SMILES ends with a ' '
+        
+        # This step transforms string tokens from generation vocabulary into integers.
+        gen_tokens_int = [self.gen_token_to_int[itoken] for itoken in self.gen_tokens]
+        
+        # Control top_k according to vocab_size
         if top_k is not None:
-            top_k = top_k if top_k <= self.vocab_size else self.vocab_size
+            top_k = top_k if top_k <= self.gen_vocab_size else self.gen_vocab_size
         else:
-            top_k = self.vocab_size
+            top_k = self.gen_vocab_size
     
         # Array of temporary new SMILES
-        starter_pre = [pre_token_int]
+        starter_pre = [gen_pre_token_int]
         if starter is not None:
-            starter_pre += [self.token_to_int[ist] for ist in token.get_tokens(np.array([starter]))[0][1:-1]]
+            starter_pre += [self.gen_token_to_int[ist] for ist in token.get_tokens(np.array([starter]))[0][1:-1]]
         starter_len = len(starter_pre)
-        starter_row = np.array([pad_token_int]*(self.gen_max_length-starter_len)+starter_pre)
+        starter_row = np.array([gen_pad_token_int]*(self.gen_max_length-starter_len)+starter_pre)
         new_smiles_tmp = np.copy(starter_row)
         new_smiles_tmp = np.tile(new_smiles_tmp, (n_generate, 1))
         # Array of new SMILES to return
@@ -385,27 +408,30 @@ class Generation(object):
             
             if self.prop_names_list is not None:
                 prob_smiles_list_toinfer = np.copy(new_smiles_tmp)
+#                 print("prob_smiles_list_toinfer")
+#                 print(prob_smiles_list_toinfer)
                 prob_smiles_list_toinfer = np.tile(prob_smiles_list_toinfer, (1,top_k)).reshape(n_generate*top_k,self.gen_max_length)
                 prob_smiles_list_toinfer[:,:(self.gen_max_length-1)] = prob_smiles_list_toinfer[:,1:]
                 prob_smiles_list_toinfer[:,-1] = sub_prior_tokens_list
-    
+
                 # convert back to SMILES and remove special characters
                 new_smiles_list_tmp = list()
                 for ismiles in prob_smiles_list_toinfer:
                     smiles_tmp = list()
                     for itoken in ismiles: 
-                        smiles_tmp.append(self.int_to_token[itoken])
+                        smiles_tmp.append(self.gen_int_to_token[itoken])
                         smi_tmp = genutils.join_tokens(genutils.remove_schar([smiles_tmp]))
                     new_smiles_list_tmp.append(smi_tmp[0])
-
+#                 print("new_smiles_list_tmp")
+#                 print(new_smiles_list_tmp)
                 lik_array = np.ones(shape=(n_generate,top_k), dtype='float64')
                 for iinfer in range(self.prop_names_list_len):
                     lik_array_tmp = inference.infer(model=self.infer_model_list[iinfer],
-                                                    data_smiles = new_smiles_list_tmp,
-                                                    check_smiles = False, 
-                                                    augment = False, 
-                                                    batch_size = batch_size,
-                                                    log_verbose = False)
+                                                    data_smiles=new_smiles_list_tmp,
+                                                    check_smiles=False,
+                                                    augment=False,
+                                                    batch_size=batch_size,
+                                                    log_verbose=False)
                     lik_array_tmp_mean = lik_array_tmp['mean'].values.astype('float64')
                     
                     ##
@@ -424,9 +450,6 @@ class Generation(object):
                     p_gen_in[p_gen_in < np.finfo(np.float64).eps] = np.finfo(np.float64).eps
                     p_gen_in = p_gen_in.reshape(n_generate,top_k)
                     lik_array *= (p_gen_in**prop_gamma_list[iinfer])
-                    ##
-                    #
-                    ##
 
                 posterior = (sub_prior**prior_gamma) * lik_array 
                 posterior = genutils.p_to_one(posterior)
@@ -438,8 +461,8 @@ class Generation(object):
             new_tokens = sub_prior_tokens[new_tokens]
             new_smiles_tmp[:,:(self.gen_max_length-1)] = new_smiles_tmp[:,1:]
             new_smiles_tmp[:,-1] = new_tokens
-            finished_smiles_idx_tmp = np.where(new_tokens == suf_token_int)[0].tolist()
-            unfinished_smiles_idx_tmp = np.where(new_tokens != suf_token_int)[0].tolist()
+            finished_smiles_idx_tmp = np.where(new_tokens == gen_suf_token_int)[0].tolist()
+            unfinished_smiles_idx_tmp = np.where(new_tokens != gen_suf_token_int)[0].tolist()
             if len(finished_smiles_idx_tmp) != 0:
                 new_smiles = np.append(new_smiles, 
                                        new_smiles_tmp[finished_smiles_idx_tmp], 
@@ -471,7 +494,7 @@ class Generation(object):
         for ismiles in new_smiles:
             smiles_tmp = list()
             for itoken in ismiles: 
-                smiles_tmp.append(self.int_to_token[itoken])
+                smiles_tmp.append(self.gen_int_to_token[itoken])
                 smi_tmp = genutils.join_tokens(genutils.remove_schar([smiles_tmp]))
             try:
                 mol_tmp = Chem.MolFromSmiles(smi_tmp[0])

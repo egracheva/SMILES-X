@@ -7,7 +7,7 @@
 from scipy import stats
 import numpy as np
 
-np.random.seed(seed=123)
+np.random.seed(seed=21)
 
 ##
 
@@ -25,6 +25,8 @@ def normalize(preds, temperature=1.0):
     # Helper function to sample an index from a probability array
     # Equivalent to p_to_one without temperature
     preds = preds.astype('float64')
+#     print("preds")
+#     print(preds)
     preds = np.log(preds) / temperature
     exp_preds = np.exp(preds)
     preds = exp_preds / np.sum(exp_preds, axis=1).reshape(-1,1)
