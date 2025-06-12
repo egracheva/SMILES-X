@@ -548,16 +548,21 @@ def main(data_smiles,
         pretrained_model = None
 
     # Setting up the cross-validation according to the model_type
-    # For regression
-    # Splitting is done based on groups of the provided SMILES data
-    # This is done for the cases where the same SMILES has multiple entries with
-    # varying additional parameters (molecular weight, proportion, processing time, etc.)
-    # For classification
+    #
+    ### For regression
+    # Splitting is done based on groups of the provided SMILES data,
+    # after concatination, if multiple SMILES are provided. This is
+    # done  for the cases where the same SMILES has multiple entries
+    # with varying additional parameters (molecular weight, proportion, 
+    # processing time, etc.)
+    #
+    #### For classification
     # Splitting is done based on the provided property (e.g. class) data
+    
     if model_type == 'regression':
-        groups = pd.DataFrame(data_smiles).groupby(by=0).ngroup().values.tolist()
+        data_smiles_concat = np.array(['j'.join(row) for row in data_smiles])
+        groups = data_smiles_concat.tolist()
         kf = GroupKFold(n_splits=k_fold_number)
-        kf.get_n_splits(X=data_smiles, groups=groups)
         kf_splits = kf.split(X=data_smiles, groups=groups)
         
         model_metrics = [metrics.mae, metrics.mse]
@@ -567,7 +572,6 @@ def main(data_smiles,
     else:        
         scale_output = False
         kf = StratifiedKFold(n_splits=k_fold_number, shuffle=True)
-        kf.get_n_splits(X=data_smiles, y=data_prop)
         kf_splits = kf.split(X=data_smiles, y=data_prop)
         
         if model_type == 'binary_classification':
