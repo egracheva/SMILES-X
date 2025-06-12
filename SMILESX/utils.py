@@ -297,8 +297,8 @@ def rand_split(smiles_input, prop_input, extra_input, err_input, train_val_idx, 
     np.random.shuffle(train_val_idx)
     
     # How many samples goes to training
-    # We perform 7:2:1 split for train:val:test sets
-    train_smpls = math.ceil(train_val_idx.shape[0]*6/9)
+    # We perform 8:2 split for train:val sets
+    train_smpls = math.ceil(train_val_idx.shape[0]*0.8)
     
     train_idx = train_val_idx[:train_smpls]
     valid_idx = train_val_idx[train_smpls:]
