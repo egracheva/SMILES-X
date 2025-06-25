@@ -638,9 +638,9 @@ def plot_fit(trues, preds, errs_true, errs_pred, err_bars: str, save_dir: str, d
             if run is None:
                 file_name = '{}/Figures/Pred_vs_True/{}_PredvsTrue_Plot_Final.png'.format(save_dir, dname)
             else:
-                file_name = '{}/Figures/Pred_vs_True/Run/{}_PredvsTrue_Plot_Run_{}.png'.format(save_dir, dname, run)
+                file_name = '{}/Figures/Pred_vs_True/Runs/{}_PredvsTrue_Plot_Run_{}.png'.format(save_dir, dname, run)
         else:
-            file_name = '{}/Figures/Pred_vs_True/Run/Folds/{}_PredvsTrue_Plot_Run_{}_Fold_{}.png'.format(save_dir, dname, run, fold)
+            file_name = '{}/Figures/Pred_vs_True/Runs/Folds/{}_PredvsTrue_Plot_Run_{}_Fold_{}.png'.format(save_dir, dname, run, fold)
 
         if len(units) != 0:
             units = ' (' + units + ')'
@@ -699,13 +699,14 @@ def plot_fit(trues, preds, errs_true, errs_pred, err_bars: str, save_dir: str, d
             plt.ylabel('Observed label', fontsize = 18)
             plt.xlabel('Predicted label', fontsize = 18)
 
-            # Define file name
-            if final:
-                file_name = '{}/Figures/Pred_vs_True/{}_PredvsTrue_{}_ConfMatrix_Final.png'.format(save_dir, set_name, dname)
-            elif run is None:
-                file_name = '{}/Figures/Pred_vs_True/Fold/{}_PredvsTrue_{}_ConfMatrix_Fold_{}.png'.format(save_dir, set_name, dname, fold, run)
+        # Define file name
+        if outsample:
+            if run is None:
+                file_name = '{}/Figures/Pred_vs_True/{}_PredvsTrue_Plot_Final.png'.format(save_dir, dname)
             else:
-                file_name = '{}/Figures/Pred_vs_True/Run/{}_PredvsTrue_{}_ConfMatrix_Fold_{}_Run_{}.png'.format(save_dir, set_name, dname, fold, run)
+                file_name = '{}/Figures/Pred_vs_True/Runs/{}_PredvsTrue_Plot_Run_{}.png'.format(save_dir, dname, run)
+        else:
+            file_name = '{}/Figures/Pred_vs_True/Runs/Folds/{}_PredvsTrue_Plot_Run_{}_Fold_{}.png'.format(save_dir, dname, run, fold)
 
             plt.savefig(file_name, bbox_inches='tight')
             plt.close()

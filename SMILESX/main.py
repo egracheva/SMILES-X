@@ -349,8 +349,8 @@ def main(data_smiles,
         save_dir = '{}/{}/{}/Train'.format(outdir, data_name, 'Augm' if augmentation else 'Can')
     scaler_dir = save_dir + '/Other/Scalers'
     model_dir = save_dir + '/Models'
-    pred_plot_run_dir = save_dir + '/Figures/Pred_vs_True/Run'
-    pred_plot_fold_dir = save_dir + '/Figures/Pred_vs_True/Run/Folds'
+    pred_plot_run_dir = save_dir + '/Figures/Pred_vs_True/Runs'
+    pred_plot_fold_dir = save_dir + '/Figures/Pred_vs_True/Runs/Folds'
     lcurve_dir = save_dir + '/Figures/Learning_Curves'
     create_dirs = [scaler_dir, model_dir, pred_plot_run_dir, pred_plot_fold_dir, lcurve_dir]
     for create_dir in create_dirs:
