@@ -22,7 +22,7 @@ from SMILESX import utils
 logger = logging.getLogger()
 
 # Learning curve plotting
-def learning_curve(train_loss, val_loss, val_loss_avg, data_skew, save_dir: str, data_name: str, ifold: int, run: int, model_type: str) -> None:
+def learning_curve(train_loss, val_loss, val_loss_avg, data_skew, save_dir: str, data_name: str, fold: int, run: int, model_type: str) -> None:
 
     fig = plt.figure(figsize=(6.75, 5), dpi=200)
 
@@ -74,13 +74,13 @@ def learning_curve(train_loss, val_loss, val_loss_avg, data_skew, save_dir: str,
                    left=True,
                    labelleft=True)
     
-    if ifold is not None:
+    if fold is not None:
         if model_type == 'regression':
             ax.legend(['Train', 'Validation', 'Running Average Validation'], loc='upper right', fontsize=12)
         else:
             ax.legend(['Train', 'Validation', 'Running Average Validation'], loc='upper left', fontsize=12)
         plt.savefig('{}/{}_LearningCurve_Fold_{}_Run_{}.png'\
-                    .format(save_dir, data_name, ifold, run), bbox_inches='tight')
+                    .format(save_dir, data_name, fold, run), bbox_inches='tight')
     else:
         if model_type == 'regression':
             ax.legend(['Train'], loc='upper right', fontsize=12)
@@ -635,11 +635,12 @@ def plot_fit(trues, preds, errs_true, errs_pred, err_bars: str, save_dir: str, d
 
         # Define file name
         if outsample:
-            file_name = '{}/Figures/Pred_vs_True/{}_PredvsTrue_Plot_Final.png'.format(save_dir, dname)
-        elif fold is None:
-            file_name = '{}/Figures/Pred_vs_True/Run/{}_PredvsTrue_Plot_Fold_{}.png'.format(save_dir, dname, fold)
+            if run is None:
+                file_name = '{}/Figures/Pred_vs_True/{}_PredvsTrue_Plot_Final.png'.format(save_dir, dname)
+            else:
+                file_name = '{}/Figures/Pred_vs_True/Run/{}_PredvsTrue_Plot_Run_{}.png'.format(save_dir, dname, run)
         else:
-            file_name = '{}/Figures/Pred_vs_True/Run/Folds/{}_PredvsTrue_Plot_Fold_{}_Run_{}.png'.format(save_dir, dname, fold, run)
+            file_name = '{}/Figures/Pred_vs_True/Run/Folds/{}_PredvsTrue_Plot_Run_{}_Fold_{}.png'.format(save_dir, dname, run, fold)
 
         if len(units) != 0:
             units = ' (' + units + ')'
