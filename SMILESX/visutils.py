@@ -14,6 +14,8 @@ from sklearn.metrics import precision_recall_curve, auc, confusion_matrix
 from sklearn.metrics import precision_recall_fscore_support
 from sklearn.metrics import roc_auc_score, average_precision_score
 
+from scipy.stats import pearsonr
+
 from SMILESX import utils
 
 # Smooth logging
@@ -308,7 +310,7 @@ def classification_metrics(y_true, y_pred, model_type, prec, average=None, label
     return precision, recall, f1_score, support, precision_prec, recall_prec, f1_score_prec, roc_auc, prc_auc, roc_auc_prec, prc_auc_prec
 ##
 
-def print_stats(trues, preds, errs_pred=None, prec: int = 4, model_type = 'regression', labels=None):
+def print_stats(trues, preds, errs_pred=None, outsample=False, prec: int = 4, model_type = 'regression', labels=None):
     """Computes, prints and returns RMSE, MAE and R2 for the predictions
 
     Parameters
@@ -320,6 +322,8 @@ def print_stats(trues, preds, errs_pred=None, prec: int = 4, model_type = 'regre
     errs_pred: list, optional
         List of train, validation and test errors associated with the
         predictions. (Default: None)
+    outsample: bool
+        Whether the stats are computed over train/val/test sets of show out-of-sample performance. (Default: False)
     prec: int
         Printing precision. (Default: 4)
     model_type: str
@@ -377,10 +381,14 @@ def print_stats(trues, preds, errs_pred=None, prec: int = 4, model_type = 'regre
 
             prec_rmse = output_prec(rmse, prec)
             prec_mae = output_prec(mae, prec)
+            
+            if outsample:
+                logging.info("Final cross-validation statistics:")
+            else:
+                logging.info("Model performance metrics for the " + set_names.pop() + " set:")
+
 
             if err_pred is None:
-                # When used for single run predictions (no standard deviation is available)
-                logging.info('Model performance metrics for the ' + set_names.pop() + ' set:')
                 logging.info("Averaged RMSE: {0:{1}f}".format(rmse, prec_rmse))
                 logging.info("Averaged MAE: {0:{1}f}\n".format(mae, prec_mae))
                 logging.info("Averaged R^2: {0:0.4f}".format(r2))
@@ -392,11 +400,6 @@ def print_stats(trues, preds, errs_pred=None, prec: int = 4, model_type = 'regre
                 d_r2 = sigma_r2(true, pred, err_pred)
                 d_rmse = sigma_rmse(true, pred, err_pred)
                 d_mae = sigma_mae(err_pred)
-
-                if len(trues)==1:
-                    logging.info("Final cross-validation statistics:")
-                else:
-                    logging.info("Model performance metrics for the " + set_names.pop() + " set:")
 
                 logging.info("Averaged RMSE: {0:{2}f}+-{1:{2}f}".format(rmse, d_rmse, prec_rmse))
                 logging.info("Averaged MAE: {0:{2}f}+-{1:{2}f}".format(mae, d_mae, prec_mae))
@@ -498,7 +501,7 @@ def output_prec(val, prec):
 ##
 
 # Plot individual plots per run for the internal tests
-def plot_fit(trues, preds, errs_true, errs_pred, err_bars: str, save_dir: str, dname: str, dlabel: str, units: str, fold: Optional[int] = None, run: Optional[int] = None, final: bool = False, model_type='regression') -> None:
+def plot_fit(trues, preds, errs_true, errs_pred, err_bars: str, save_dir: str, dname: str, dlabel: str, units: str, run: Optional[int] = None, fold: Optional[int] = None, outsample: bool = False, model_type='regression') -> None:
     """
     Parameters
     ----------
@@ -527,13 +530,17 @@ def plot_fit(trues, preds, errs_true, errs_pred, err_bars: str, save_dir: str, d
         Cross-validation fold index.
     run: int, optional
         Run index.
-    final: bool
+    outsample: bool
         Whether the plot is built for the final out-of-sample predictions.
     model_type: str
         Type of the model to be used. Can be either 'regression', 'binary_classification', or 'multi_classification'. (Default: 'regression')
     """
 
     set_names = ['Test', 'Validation', 'Train']
+    colors = ['#d9d9d9', '#878787', 'black']
+    sizes = [15, 10, 10]
+
+    sns.set_theme(style="whitegrid", font_scale=1.5, rc={"font.family": "serif"})
 
     if model_type == 'regression':
 
@@ -556,83 +563,109 @@ def plot_fit(trues, preds, errs_true, errs_pred, err_bars: str, save_dir: str, d
         ax.set_xlim(min(axmin, aymin), max(axmax, aymax))
         ax.set_ylim(min(axmin, aymin), max(axmax, aymax))
 
-        colors = ['#cc1b00', '#db702e', '#519fc4']
-
         if errs_pred is None:
             errs_pred = [None]*len(preds)
+            
+        # Plot X=Y line
+        ax.plot([max(plt.xlim()[0], plt.ylim()[0]),
+                min(plt.xlim()[1], plt.ylim()[1])],
+                [max(plt.xlim()[0], plt.ylim()[0]),
+                min(plt.xlim()[1], plt.ylim()[1])],
+                ':', color = "lightgray")
 
         for true, pred, err_true, err_pred in zip(trues, preds, errs_true, errs_pred):
             # Put the shapes of the errors to the format accepted by matplotlib
             # (N, ) for symmetric errors, (2, N) for asymmetric errors
             if err_bars is not None:
                 err_true = error_format(true, err_true, err_bars)
+                
+            ax.errorbar(
+                true.ravel(),
+                pred.ravel(),
+                xerr=err_true,
+                yerr=err_pred,
+                fmt='none',  # no marker
+                ecolor='#c7c7c7',
+                elinewidth=1.5,
+                capsize=4,
+                alpha=0.7,
+                label='_nolegend_'
+            )
 
-            # Legend printing for train/val/test
-            if final:
-                # No legend is needed for the final out-of-sample prediction
-                set_name = None
+            # Plot the markers (circles), these will go into the legend
+            ax.plot(
+                true.ravel(),
+                pred.ravel(),
+                'o',
+                markersize=sizes.pop(),
+                markeredgecolor='black',
+                markeredgewidth=1.2,
+                color=colors.pop(),
+                alpha=0.9,
+                label=set_names.pop()  # this will show up in the legend
+            )
+            
+        if outsample:
+            # Add the out-of-sample stats (used for folds and overall prediction)
+            corr, p_value = pearsonr(true.ravel(), pred.ravel())
+            rmse = np.sqrt(mean_squared_error(true.ravel(), pred.ravel()))
+            mae = mean_absolute_error(true.ravel(), pred.ravel())
+            r2 = r2_score(true.ravel(), pred.ravel())
+
+            # When used for fold/total predictions
+            if err_pred is not None:
+                d_r2 = sigma_r2(true.ravel(), pred.ravel(), err_pred)
+                d_rmse = sigma_rmse(true.ravel(), pred.ravel(), err_pred)
+                d_mae = sigma_mae(err_pred)
+            
+                ax.text(0.95, 0.05,
+                        f"Correlation: {corr:.2f}\nRMSE: {rmse:.3f}±{d_rmse:.3f}\nMAE: {mae:.3f}±{d_mae:.3f}\nR2-score: {r2:.3f}±{d_r2:.3f}",  # Explicit newline
+                        fontsize=14, transform=plt.gca().transAxes,
+                        verticalalignment="bottom", horizontalalignment="right",
+                        bbox=dict(facecolor='white', edgecolor='black', boxstyle="round,pad=0.3"))
             else:
-                set_name = set_names.pop()
-
-            ax.errorbar(true.ravel(),
-                        pred.ravel(),
-                        xerr = err_true,
-                        yerr = err_pred,
-                        fmt='o',
-                        label=set_name,
-                        ecolor='#bababa',
-                        elinewidth = 0.5,
-                        ms=5,
-                        mfc=colors.pop(),
-                        markeredgewidth = 0,
-                        alpha=0.7)
+                ax.text(0.95, 0.05,
+                        f"Correlation: {corr:.2f}\nRMSE: {rmse:.3f}\nMAE: {mae:.3f}\nR2-score: {r2:.3f}",  # Explicit newline
+                        fontsize=14, transform=plt.gca().transAxes,
+                        verticalalignment="bottom", horizontalalignment="right",
+                        bbox=dict(facecolor='white', edgecolor='black', boxstyle="round,pad=0.3"))
+            
+        else:
+            plt.legend(frameon=False, fontsize=14, loc="upper left")
 
         # Define file name
-        if final:
+        if outsample:
             file_name = '{}/Figures/Pred_vs_True/{}_PredvsTrue_Plot_Final.png'.format(save_dir, dname)
-        elif run is None:
-            file_name = '{}/Figures/Pred_vs_True/Folds/{}_PredvsTrue_Plot_Fold_{}.png'.format(save_dir, dname, fold)
+        elif fold is None:
+            file_name = '{}/Figures/Pred_vs_True/Run/{}_PredvsTrue_Plot_Fold_{}.png'.format(save_dir, dname, fold)
         else:
-            file_name = '{}/Figures/Pred_vs_True/Runs/{}_PredvsTrue_Plot_Fold_{}_Run_{}.png'.format(save_dir, dname, fold, run)
-
-        # Plot X=Y line
-        ax.plot([max(plt.xlim()[0], plt.ylim()[0]),
-                min(plt.xlim()[1], plt.ylim()[1])],
-                [max(plt.xlim()[0], plt.ylim()[0]),
-                min(plt.xlim()[1], plt.ylim()[1])],
-                ':', color = '#595f69')
+            file_name = '{}/Figures/Pred_vs_True/Run/Folds/{}_PredvsTrue_Plot_Fold_{}_Run_{}.png'.format(save_dir, dname, fold, run)
 
         if len(units) != 0:
             units = ' (' + units + ')'
+            
         if len(dlabel) != 0:
             plt.xlabel(r"{}, experimental {}".format(dlabel, units), fontsize = 18)
             plt.ylabel(r"{}, prediction {}".format(dlabel, units), fontsize = 18)
-    #         plt.xlabel('{}, ground truth {}'.format(dlabel, units), fontsize = 18)
-    #         plt.ylabel('{}, prediction {}'.format(dlabel, units), fontsize = 18)
         else:
             plt.xlabel('Ground truth {}'.format(units), fontsize = 18)
             plt.ylabel('Prediction {}'.format(units), fontsize = 18)
-        if not final:
-            ax.legend(fontsize=14)
+        
         for item in ([ax.title, ax.xaxis.label, ax.yaxis.label] +
                     ax.get_xticklabels() + ax.get_yticklabels()):
             item.set_fontsize(14)
-        ax.tick_params(bottom=True, top=True, left=True, right=True)
-        ax.tick_params(axis="x", direction="inout")
-        ax.tick_params(axis="y", direction="inout")
-        ax.xaxis.set_minor_locator(AutoMinorLocator())
-        ax.yaxis.set_minor_locator(AutoMinorLocator())
-        ax.tick_params(axis="x", which="minor", direction="out",
-            top=True, labeltop=True, bottom=True, labelbottom=True)
-        ax.tick_params(axis="y", which="minor", direction="out",
-            right=True, labelright=True, left=True, labelleft=True)
+         
+        # Customizing axes
+        plt.xticks(fontsize=14)
+        plt.yticks(fontsize=14)
+        plt.grid(True, linestyle="--", linewidth=0.5, alpha=0.7)
 
         plt.savefig(file_name, bbox_inches='tight')
         plt.close()
 
     elif model_type.split('_')[1] == 'classification':
         
-        #TODO(Guillaume): Account for errors when plotting
+        #TODO: Account for errors when plotting
         for true, pred, err_pred in zip(trues, preds, errs_pred):
             if model_type == 'regression':
                 true, pred = np.array(true).ravel(), np.array(pred).ravel()
@@ -669,9 +702,9 @@ def plot_fit(trues, preds, errs_true, errs_pred, err_bars: str, save_dir: str, d
             if final:
                 file_name = '{}/Figures/Pred_vs_True/{}_PredvsTrue_{}_ConfMatrix_Final.png'.format(save_dir, set_name, dname)
             elif run is None:
-                file_name = '{}/Figures/Pred_vs_True/Folds/{}_PredvsTrue_{}_ConfMatrix_Fold_{}.png'.format(save_dir, set_name, dname, fold)
+                file_name = '{}/Figures/Pred_vs_True/Fold/{}_PredvsTrue_{}_ConfMatrix_Fold_{}.png'.format(save_dir, set_name, dname, fold, run)
             else:
-                file_name = '{}/Figures/Pred_vs_True/Runs/{}_PredvsTrue_{}_ConfMatrix_Fold_{}_Run_{}.png'.format(save_dir, set_name, dname, fold, run)
+                file_name = '{}/Figures/Pred_vs_True/Run/{}_PredvsTrue_{}_ConfMatrix_Fold_{}_Run_{}.png'.format(save_dir, set_name, dname, fold, run)
 
             plt.savefig(file_name, bbox_inches='tight')
             plt.close()
