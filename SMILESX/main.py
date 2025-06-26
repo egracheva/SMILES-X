@@ -42,7 +42,7 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras import metrics
 from tensorflow.keras import backend as K
 
-from sklearn.model_selection import GroupKFold, StratifiedKFold
+from sklearn.model_selection import KFold, StratifiedKFold
 
 from SMILESX import utils, token, augm
 from SMILESX import model, bayopt, geomopt
@@ -572,18 +572,18 @@ def main(data_smiles,
     # Splitting is done based on the provided property (e.g. class) data
     
     
-    prediction_test_run = np.zeros((data_length, n_runs))
+    prediction_test = np.zeros((data_length, n_runs))
     
     # Loop over n_runs (for different data splits)
-    for run in range(n_runs):
+    for irun in range(n_runs):
         
         start_run = time.time()
-        logging.info("*** Run #{} ***".format(run))
+        logging.info("*** Run #{} ***".format(irun))
             
         if model_type == 'regression':
             data_smiles_concat = np.array(['j'.join(row) for row in data_smiles])
             groups = data_smiles_concat.tolist()
-            kf = GroupKFold(n_splits=k_fold_number)
+            kf = KFold(n_splits=k_fold_number, shuffle=True, random_state=irun)
             kf_splits = kf.split(X=data_smiles, groups=groups)
 
             model_metrics = [metrics.mae, metrics.mse]
@@ -777,7 +777,7 @@ def main(data_smiles,
                                                                vocab=tokens)
 
             # Hyperparameters optimisation only for the first time the data is seen
-            if run==0 & ifold==0:
+            if irun == 0 and ifold == 0:
                 logging.info("*** HYPERPARAMETERS OPTIMISATION ***")
                 logging.info("")
 
@@ -888,7 +888,7 @@ def main(data_smiles,
             logging.info(time.strftime("%m/%d/%Y %H:%M:%S", time.localtime()))
 
             # Checkpoint, Early stopping and callbacks definition
-            filepath = '{}/{}_Model_Run_{}_Fold_{}.hdf5'.format(model_dir, data_name, run, ifold)
+            filepath = '{}/{}_Model_Run_{}_Fold_{}.hdf5'.format(model_dir, data_name, irun, ifold)
 
             if train_mode == 'off' or os.path.exists(filepath):
                 logging.info("Training was set to `off`.")
@@ -899,13 +899,13 @@ def main(data_smiles,
                 K.clear_session()
                 # Freeze the first half of the network in case of transfer learning
                 if train_mode == 'finetune':
-                    model_train = model.model_dic['Fold_{}'.format(ifold)][run]
+                    model_train = model.model_dic['Fold_{}'.format(ifold)][irun]
                     # Freeze encoding layers
                     #TODO(Guillaume): Check if this is the best way to freeze the layers as layers' name may differ
                     for layer in mod.layers:
                         if layer.name in ['embedding', 'bidirectional', 'time_distributed']:
                             layer.trainable = False
-                    if (ifold==0 and run==0):
+                    if (ifold==0 and irun==0):
                         logging.info("Retrieved model summary:")
                         model_train.summary(print_fn=logging.info)
                         logging.info("")
@@ -927,7 +927,7 @@ def main(data_smiles,
                             model_train.compile(loss=trainutils.FocalLossCustom(alpha=0.2, gamma=2.0), optimizer=custom_adam, metrics=model_metrics)
                         else:
                             model_train.compile(loss=model_loss, optimizer=custom_adam, metrics=model_metrics)
-                    if (ifold==0 and run==0):
+                    if (ifold==0 and irun==0):
                         logging.info("Model summary:")
                         model_train.summary(print_fn=logging.info)
                         logging.info("\n")
@@ -1088,7 +1088,7 @@ def main(data_smiles,
                                         lcurve_dir,
                                         data_name,
                                         ifold,
-                                        run,
+                                        irun,
                                         model_type)
 
             logging.info("Evaluating performance of the trained model...")
@@ -1128,12 +1128,12 @@ def main(data_smiles,
                 y_test_clean_unscaled = y_test_clean.ravel()
 
 
-            # Compute average per set of augmented SMILES for the plots per run
+            # Compute average per set of augmented SMILES for the plots per fold
             y_pred_train_mean_augm, y_pred_train_std_augm = utils.mean_result(x_train_enum_card, y_pred_train_unscaled, model_type)
             y_pred_valid_mean_augm, y_pred_valid_std_augm = utils.mean_result(x_valid_enum_card, y_pred_valid_unscaled, model_type)
             y_pred_test_mean_augm, y_pred_test_std_augm = utils.mean_result(x_test_enum_card, y_pred_test_unscaled, model_type)
 
-            # Print the stats for the run
+            # Print the stats for the fold
             visutils.print_stats(trues=[y_train_clean_unscaled, y_valid_clean_unscaled, y_test_clean_unscaled],
                                  preds=[y_pred_train_mean_augm, y_pred_valid_mean_augm, y_pred_test_mean_augm],
                                  errs_pred=[y_pred_train_std_augm, y_pred_valid_std_augm, y_pred_test_std_augm],
@@ -1141,7 +1141,7 @@ def main(data_smiles,
                                  model_type=model_type, 
                                  labels = unique_classes)
 
-            # Plot prediction vs observation plots per run
+            # Plot prediction vs observation plots per fold
             visutils.plot_fit(trues=[y_train_clean_unscaled, y_valid_clean_unscaled, y_test_clean_unscaled],
                               preds=[y_pred_train_mean_augm, y_pred_valid_mean_augm, y_pred_test_mean_augm],
                               errs_true=[y_err_train, y_err_valid, y_err_test],
@@ -1151,23 +1151,19 @@ def main(data_smiles,
                               dname=data_name,
                               dlabel=data_label,
                               units=data_units,
-                              run=run, 
+                              run=irun, 
                               fold=ifold,
                               model_type=model_type)
 
-#                 logging.info("Run {}, fold {} duration: {}".format(run, ifold, str(datetime.timedelta(seconds=elapsed_run))))
-#                 logging.info("")
-
             if model_type == 'multiclass_classification':
                 y_pred_test_mean_augm_argmax = np.argmax(y_pred_test_mean_augm, axis=1).ravel()
-                prediction_test_run[test_idx_clean, run] = y_pred_test_mean_augm_argmax
+                prediction_test[test_idx_clean, irun] = y_pred_test_mean_augm_argmax
             else:
-                prediction_test_run[test_idx_clean, run] = y_pred_test_mean_augm
-            # End of one fold
+                prediction_test[test_idx_clean, irun] = y_pred_test_mean_augm
 
         # Print the stats for the run
         run_scores = visutils.print_stats(trues=[data_prop.reshape(-1,1)],
-                                          preds=[prediction_test_run[:, run]],
+                                          preds=[prediction_test[:, irun]],
                                           prec=prec,
                                           outsample=True,
                                           model_type=model_type,
@@ -1177,7 +1173,7 @@ def main(data_smiles,
 
         # Plot prediction vs observation plots for the run
         visutils.plot_fit(trues=[data_prop.reshape(-1,1)],
-                          preds=[prediction_test_run[:, run]],
+                          preds=[prediction_test[:, irun]],
                           errs_true=[data_err],
                           errs_pred=[None],
                           err_bars=err_bars,
@@ -1185,71 +1181,68 @@ def main(data_smiles,
                           dname=data_name,
                           dlabel=data_label,
                           units=data_units,
-                          run=run,
+                          run=irun,
                           outsample=True,
                           model_type=model_type)
 
 
         end_run = time.time()
         elapsed_fold = end_run - start_run
-        logging.info("Run {} duration: {}".format(ifold, str(datetime.timedelta(seconds=elapsed_fold))))
+        logging.info("Run {} duration: {}".format(irun, str(datetime.timedelta(seconds=elapsed_fold))))
         logging.info("")
 
-        # End of one run
-        pred_mean = np.mean(prediction_test_run, axis=1)
-        pred_sigma = np.std(prediction_test_run, axis=1)
+    # Overall performance
+    pred_mean = np.mean(prediction_test, axis=1)
+    pred_sigma = np.std(prediction_test, axis=1)
 
-        # Save the predictions to the final table
-        if model_type == 'multiclass_classification':
-            pred_mean_argmax = np.argmax(pred_mean, axis=1).ravel()
-            predictions['Mean'] = pred_mean_argmax
-            predictions['Standard deviation'] = pred_sigma[np.arange(len(pred_sigma)), pred_mean_argmax.tolist()].ravel()
-        else:
-            predictions['Mean'] = pred_mean.ravel()
-            predictions['Standard deviation'] = pred_sigma.ravel()
-        predictions.to_csv('{}/{}_Predictions.csv'.format(save_dir, data_name), index=False)
+    # Save the predictions to the final table
+    if model_type == 'multiclass_classification':
+        pred_mean_argmax = np.argmax(pred_mean, axis=1).ravel()
+        predictions['Mean'] = pred_mean_argmax
+        predictions['Standard deviation'] = pred_sigma[np.arange(len(pred_sigma)), pred_mean_argmax.tolist()].ravel()
+    else:
+        predictions['Mean'] = pred_mean.ravel()
+        predictions['Standard deviation'] = pred_sigma.ravel()
+    predictions.to_csv('{}/{}_Predictions.csv'.format(save_dir, data_name), index=False)
 
-        logging.info("Run {}, overall performance:".format(run))
+    logging.info("Run {}, overall performance:".format(irun))
 
-        # Change to run condition here
-        # Only summarize when all runs and folds have been processed
-        if run == (n_runs-1) and ifold == (k_fold_number-1) and not k_fold_index:
-            logging.info("*******************************")
-            logging.info("***Predictions score summary***")
-            logging.info("*******************************")
-            logging.info("")
+    logging.info("*******************************")
+    logging.info("***Predictions score summary***")
+    logging.info("*******************************")
+    logging.info("")
 
-            logging.info("***Preparing the final out-of-sample prediction.***")
-            logging.info("")
+    logging.info("***Preparing the final out-of-sample prediction.***")
+    logging.info("")
 
-            data_prop_clean = data_prop[predictions.notna().all(axis=1)]
-            data_err_clean = data_err[predictions.notna().all(axis=1)] if data_err is not None else None
-            predictions = predictions.dropna()       
+    data_prop_clean = data_prop[predictions.notna().all(axis=1)]
+    data_err_clean = data_err[predictions.notna().all(axis=1)] if data_err is not None else None
+    predictions = predictions.dropna()       
 
-            # Print the stats for the whole data
-            final_scores = visutils.print_stats(trues=[data_prop_clean],
-                                                preds=[predictions['Mean'].values],
-                                                errs_pred=[predictions['Standard deviation'].values],
-                                                prec=prec,
-                                                outsample=True,
-                                                model_type=model_type, 
-                                                labels = unique_classes)
+    # Print the stats for the whole data
+    final_scores = visutils.print_stats(trues=[data_prop_clean],
+                                        preds=[predictions['Mean'].values],
+                                        errs_pred=[predictions['Standard deviation'].values],
+                                        prec=prec,
+                                        outsample=True,
+                                        model_type=model_type, 
+                                        labels = unique_classes)
 
-            scores_final = [err for set_name in final_scores for err in set_name]
+    scores_final = [err for set_name in final_scores for err in set_name]
 
-            # Final plot for prediction vs observation
-            visutils.plot_fit(trues=[data_prop_clean.reshape(-1,1)],
-                              preds=[predictions['Mean'].values],
-                              errs_true=[data_err_clean],
-                              errs_pred=[predictions['Standard deviation'].values],
-                              err_bars=err_bars,
-                              save_dir=save_dir,
-                              dname=data_name,
-                              dlabel=data_label,
-                              units=data_units,
-                              outsample=True,
-                              run=None,
-                              model_type=model_type)
+    # Final plot for prediction vs observation
+    visutils.plot_fit(trues=[data_prop_clean.reshape(-1,1)],
+                      preds=[predictions['Mean'].values],
+                      errs_true=[data_err_clean],
+                      errs_pred=[predictions['Standard deviation'].values],
+                      err_bars=err_bars,
+                      save_dir=save_dir,
+                      dname=data_name,
+                      dlabel=data_label,
+                      units=data_units,
+                      outsample=True,
+                      run=None,
+                      model_type=model_type)
 
 #                 if model_type == 'regression':
 #                     scores_list = ['RMSE', 'MAE', 'R2-score']
