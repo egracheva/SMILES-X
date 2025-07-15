@@ -91,6 +91,7 @@ def main(data_smiles,
          n_runs: Optional[int] = None,
          check_smiles: bool = True,
          augmentation: bool = False,
+         shuffle: bool = False,
          geom_sample_size: int = 32,
          bayopt_n_rounds: int = 25,
          bayopt_n_epochs: int = 30,
@@ -246,6 +247,10 @@ def main(data_smiles,
         This is recommended for small datasets and models' performance improvement, even if this will increase 
         the training time. 
         (Default: False)
+    shuffle: bool
+        Whether to generate all permutations of the input SMILES list. Recommended when SMILES order is not
+        relevant to the property of interest.
+        (Default: False)
     geom_sample_size: int
         Number of data samples used for trainless geometry evaluation.
         (Default: 32)
@@ -330,12 +335,21 @@ def main(data_smiles,
     '''
 
     start_time = time.time()
-
+    
+    mode_parts = []
     # Define and create output directories
+    if shuffle:
+        mode_parts.append("Shuffle")
+    if augmentation:
+        mode_parts.append("Augm")
+    if not mode_parts:
+        mode_parts.append("Can")  # canonical only
     if train_mode=='finetune':
-        save_dir = '{}/{}/{}/Transfer'.format(outdir, data_name, 'Augm' if augmentation else 'Can')
-    else:
-        save_dir = '{}/{}/{}/Train'.format(outdir, data_name, 'Augm' if augmentation else 'Can')
+        mode_parts.append("Finetune")
+
+    mode = "+".join(mode_parts)
+    save_dir = f"{outdir}/{data_name}/{mode}/Train"
+        
     scaler_dir = save_dir + '/Other/Scalers'
     model_dir = save_dir + '/Models'
     pred_plot_run_dir = save_dir + '/Figures/Pred_vs_True/Runs'
@@ -657,21 +671,24 @@ def main(data_smiles,
                                        extra_train,
                                        y_train_scaled,
                                        check_smiles,
-                                       augmentation)
+                                       augmentation,
+                                       shuffle)
 
         valid_augm = augm.augmentation(x_valid,
                                        train_val_idx,
                                        extra_valid,
                                        y_valid_scaled,
                                        check_smiles,
-                                       augmentation)
+                                       augmentation,
+                                       shuffle)
 
         test_augm = augm.augmentation(x_test,
                                       test_idx,
                                       extra_test,
                                       y_test_scaled,
                                       check_smiles,
-                                      augmentation)
+                                      augmentation,
+                                      shuffle)
         
         x_train_enum, extra_train_enum, y_train_enum, y_train_clean, x_train_enum_card, _ = train_augm
         x_valid_enum, extra_valid_enum, y_valid_enum, y_valid_clean, x_valid_enum_card, _ = valid_augm

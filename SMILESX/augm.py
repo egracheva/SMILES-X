@@ -12,7 +12,7 @@ from rdkit import Chem
 
 from SMILESX import utils
 
-def augmentation(data_smiles, indices, data_extra=None, data_prop=None, check_smiles=True, augment=False):
+def augmentation(data_smiles, indices, data_extra=None, data_prop=None, check_smiles=True, augment=False, shuffle=False):
     """Augmentation
 
     Parameters
@@ -29,6 +29,8 @@ def augmentation(data_smiles, indices, data_extra=None, data_prop=None, check_sm
         Whether to verify SMILES correctness via RDKit (default: True)
     augment: bool
         Whether to augment the data by atom rotation (default: False)
+    shuffle: bool
+        Whether to generate all permutations of the input SMILES list (default: False)  
 
     Returns
     -------
@@ -63,10 +65,10 @@ def augmentation(data_smiles, indices, data_extra=None, data_prop=None, check_sm
     
     for csmiles, ismiles in enumerate(data_smiles.tolist()):
         if augment:
-            enumerated_smiles = generate_smiles(ismiles, rotate=True)
+            enumerated_smiles = generate_smiles(ismiles, rotate=True, shuffle=shuffle)
         else:
             if check_smiles:
-                enumerated_smiles = generate_smiles(ismiles, rotate=False)
+                enumerated_smiles = generate_smiles(ismiles, rotate=False, shuffle=shuffle)
             else:
                 if not isinstance(ismiles, list):
                     ismiles = [ismiles]
@@ -127,74 +129,83 @@ def rotate_atoms(li, x):
 
     return (li[x%len(li):]+li[:x%len(li)])
 ##
+
 # Changed kekule from False to True to prevent aromatic notation
-def generate_smiles(smiles, kekule = True, rotate = False):
-    """Generate SMILES list
+def generate_smiles(smiles, kekule=True, rotate=False, shuffle=False):
+    """
+    Generate SMILES list with optional augmentation (atom rotation)
+    and shuffling of SMILES positions in a multi-SMILES input.
 
     Parameters
     ----------
-    smiles: list(str)
-        SMILES list to be prepared.
-    kekule: bool
-        Kekulize option setup. (Default: False)
-    canon: bool
-        Canonicalize. (Default: True)
-    rotate: bool
-        Rotation of atoms's index for augmentation. (Default: False)
+    smiles : str or list(str)
+        SMILES string or list of SMILES strings.
+    kekule : bool
+        Kekulize option setup.
+    rotate : bool
+        Rotation of atom indices for augmentation.
+    shuffle : bool
+        Whether to generate all permutations of the input SMILES list.
 
     Returns
     -------
-    smiles_augment: list
-        A list of augmented SMILES (non-canonical equivalents from canonical SMILES representation).
+    output_augm : list of lists
+        Augmented (and/or shuffled) SMILES lists.
     """
-    
-    output_augm = []
-    augms = []
-    # Single SMILES per input
     if isinstance(smiles, str):
         smiles = [smiles]
-    # Multiple SMILES per input (e.g., copolymers, additives, etc.)
-    for ismiles in smiles:
-        if ismiles != '':
-            mols = [] # only for this smiles augmenting and returning a list of augms
-            ismiles_augm = []
-            # Get augmentations per SMILES
-            try:
-                mol = Chem.MolFromSmiles(ismiles)
-                mols.append(mol)
-                n_atoms = mol.GetNumAtoms()
-                n_atoms_list = [nat for nat in range(n_atoms)]
-                if rotate:
-                    canon = False
-                    if n_atoms != 0:
-                        for iatoms in range(n_atoms):
-                            n_atoms_list_tmp = rotate_atoms(n_atoms_list, iatoms)
-                            rot_mol = Chem.RenumberAtoms(mol, n_atoms_list_tmp)
-                            mols.append(rot_mol)
-                else:
-                    canon = False # Changed here to prevent aromatic notation
-            except:
-                mol = None
 
-            for mol in mols:
+
+    original_smiles_list = [smiles]  # default: no shuffle
+
+    if shuffle:
+        perms = list(itertools.permutations(smiles))
+        original_smiles_list = [list(p) for p in perms]
+    
+    all_augmented_lists = []
+
+    for smi_list in original_smiles_list:
+        augms = []
+        for ismiles in smi_list:
+            ismiles_augm = []
+            if ismiles != '':
+                mols = []
                 try:
-                    ismiles = Chem.MolToSmiles(mol,
-                                               isomericSmiles=True,
-                                               kekuleSmiles=kekule,
-                                               rootedAtAtom=-1,
-                                               canonical=canon,
-                                               allBondsExplicit=False,
-                                               allHsExplicit=False)
+                    mol = Chem.MolFromSmiles(ismiles)
+                    mols.append(mol)
+                    n_atoms = mol.GetNumAtoms()
+                    n_atoms_list = list(range(n_atoms))
+                    if rotate and n_atoms != 0:
+                        for i in range(n_atoms):
+                            rot_mol = Chem.RenumberAtoms(mol, rotate_atoms(n_atoms_list, i))
+                            mols.append(rot_mol)
                 except:
-                    ismiles=None
-                ismiles_augm.append(ismiles)
-            # Remove duplicates
-            ismiles_augm = list(dict.fromkeys(ismiles_augm).keys())
-            # Store augmentations for each of multiple SMILES provided for a single data point
-            augms.append(ismiles_augm)
-        else:
-            augms.append([''])
-    # All the possible combinations of multiple augmented SMILES
-    output_augm = [list(au) for au in itertools.product(*augms)]
-    return output_augm
+                    mol = None
+
+                for mol in mols:
+                    try:
+                        aug = Chem.MolToSmiles(
+                            mol,
+                            isomericSmiles=True,
+                            kekuleSmiles=kekule,
+                            rootedAtAtom=-1,
+                            canonical=False,
+                            allBondsExplicit=False,
+                            allHsExplicit=False,
+                        )
+                        ismiles_augm.append(aug)
+                    except:
+                        ismiles_augm.append(None)
+
+                # Remove duplicates
+                ismiles_augm = list(dict.fromkeys(ismiles_augm))
+                augms.append(ismiles_augm)
+            else:
+                augms.append([''])
+
+        # Cartesian product of all augmentations per position
+        combo = [list(au) for au in itertools.product(*augms)]
+        all_augmented_lists.extend(combo)
+
+    return all_augmented_lists
 ##
